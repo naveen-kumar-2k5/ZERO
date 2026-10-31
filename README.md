@@ -1,14 +1,14 @@
 <div align="center">
 
-<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0f2027,50:203a43,100:2c5364&height=220&section=header&text=ZERO&fontSize=90&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Detect%20%E2%80%A2%20Triage%20%E2%80%A2%20Respond&descSize=22&descAlignY=60" alt="ZERO banner" width="100%"/>
+<img src="https://capsule-render.vercel.app/api?type=waving&color=0:0f2027,50:203a43,100:2c5364&height=220&section=header&text=ZERO&fontSize=90&fontColor=ffffff&animation=fadeIn&fontAlignY=38&desc=Detect%20%7C%20Triage%20%7C%20Respond&descSize=22&descAlignY=60" alt="ZERO banner" width="100%"/>
 
-### 🛡️ A lightweight SOC dashboard & incident-response platform for Wazuh
+### A lightweight SOC dashboard and incident-response platform for Wazuh
 
 <p>
   <img src="https://img.shields.io/badge/Python-3.10+-3776AB?style=for-the-badge&logo=python&logoColor=white" alt="Python"/>
   <img src="https://img.shields.io/badge/Flask-Backend-000000?style=for-the-badge&logo=flask&logoColor=white" alt="Flask"/>
   <img src="https://img.shields.io/badge/PostgreSQL-16-4169E1?style=for-the-badge&logo=postgresql&logoColor=white" alt="PostgreSQL"/>
-  <img src="https://img.shields.io/badge/Wazuh-SIEM-005571?style=for-the-badge&logo=wazuh&logoColor=white" alt="Wazuh"/>
+  <img src="https://img.shields.io/badge/Wazuh-SIEM-005571?style=for-the-badge" alt="Wazuh"/>
   <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
 </p>
 
@@ -19,94 +19,94 @@
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square" alt="PRs welcome"/>
 </p>
 
-[✨ Features](#-features) •
-[🏗️ Architecture](#️-architecture) •
-[🚀 Quick Start](#-quick-start) •
-[⚙️ Configuration](#️-configuration) •
-[📡 API](#-api-overview) •
-[🤝 Contributing](#-contributing)
+[Features](#features) |
+[Architecture](#architecture) |
+[Quick Start](#quick-start) |
+[Configuration](#configuration) |
+[API](#api-overview) |
+[Contributing](#contributing)
 
 </div>
 
 ---
 
-## 📖 About
+## About
 
 **ZERO** ingests security alerts from [Wazuh](https://wazuh.com/) through a webhook, stores them in PostgreSQL, and serves them in a clean web UI with live alert feeds, platform health, monitored endpoints, and an incident case manager driven by response playbooks.
 
-> 💡 From raw alert to resolved case, all in one place.
+> From raw alert to resolved case, all in one place.
 
 ---
 
-## ✨ Features
+## Features
 
-| | Feature | Description |
-|---|---|---|
-| 📥 | **Webhook Receiver** | Accepts Wazuh alerts and normalises source IP, target user, MITRE technique/tactic and threat type |
-| 🔄 | **Alert Poller** | Continuously syncs parsed alerts from the webhook into PostgreSQL |
-| 📊 | **SOC Dashboard** | Severity breakdown, daily trend, top agents, top source IPs, category split, recent alerts |
-| 🔎 | **Alert Feed** | Filter by severity, category, free-text search and time range |
-| 🧠 | **Threat Classification** | Maps alerts into Brute Force, Privilege Escalation, File Integrity and Ransomware using threat type, rule IDs and MITRE ATT&CK families |
-| 🖥️ | **Monitored Systems** | Live Wazuh agent inventory: status, OS, department, alerts today, last keep-alive |
-| 💓 | **Platform Health** | Checks for Webhook API, UI, PostgreSQL and alert-sync freshness |
-| 🗂️ | **Incident Cases** | Case lifecycle tracking with step-by-step response playbooks |
-| 🔐 | **Auth & RBAC** | Session login, admin-only routes, password reset and audit log |
-| 🐳 | **Dockerised** | Entire stack up with one command |
+| Feature | Description |
+|:---|:---|
+| **Webhook Receiver** | Accepts Wazuh alerts and normalises source IP, target user, MITRE technique/tactic and threat type |
+| **Alert Poller** | Continuously syncs parsed alerts from the webhook into PostgreSQL |
+| **SOC Dashboard** | Severity breakdown, daily trend, top agents, top source IPs, category split, recent alerts |
+| **Alert Feed** | Filter by severity, category, free-text search and time range |
+| **Threat Classification** | Maps alerts into Brute Force, Privilege Escalation, File Integrity and Ransomware using threat type, rule IDs and MITRE ATT&CK families |
+| **Monitored Systems** | Live Wazuh agent inventory: status, OS, department, alerts today, last keep-alive |
+| **Platform Health** | Checks for Webhook API, UI, PostgreSQL and alert-sync freshness |
+| **Incident Cases** | Case lifecycle tracking with step-by-step response playbooks |
+| **Auth and RBAC** | Session login, admin-only routes, password reset and audit log |
+| **Dockerised** | Entire stack up with one command |
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 ```mermaid
 flowchart LR
-    W[🛡️ Wazuh Manager]
-    H[📥 webhook.py<br/>:5000]
-    P[🔄 main.py<br/>Poller]
-    D[(🐘 PostgreSQL 16)]
-    A[🖥️ app.py<br/>Flask UI :5001]
+    W["Wazuh Manager"]
+    H["webhook.py (port 5000)"]
+    P["main.py (Poller)"]
+    D[("PostgreSQL 16")]
+    A["app.py (Flask UI, port 5001)"]
 
-    W -- "POST /webhook" --> H
-    P -- "GET /api/v1/alerts" --> H
-    P -- "INSERT" --> D
-    A <-- "SQL" --> D
-    W -- "REST API: agents & alerts" --> A
+    W -->|"POST /webhook"| H
+    P -->|"GET /api/v1/alerts"| H
+    P -->|"INSERT"| D
+    A <-->|"SQL"| D
+    W -->|"REST API: agents and alerts"| A
 ```
 
 | Service | Entry point | Port | Purpose |
 |:---|:---|:---:|:---|
-| 🐘 `db` | PostgreSQL 16 | `5432` | Stores alerts, users, cases and audit data (`init.sql`) |
-| 📥 `webhook` | `webhook.py` | `5000` | Receives and parses Wazuh alerts |
-| 🔄 `poller` | `main.py` | n/a | Syncs alerts from the webhook into PostgreSQL |
-| 🖥️ `app` | `app.py` | `5001` | Web UI, REST API, auth, cases and health checks |
+| `db` | PostgreSQL 16 | `5432` | Stores alerts, users, cases and audit data (`init.sql`) |
+| `webhook` | `webhook.py` | `5000` | Receives and parses Wazuh alerts |
+| `poller` | `main.py` | n/a | Syncs alerts from the webhook into PostgreSQL |
+| `app` | `app.py` | `5001` | Web UI, REST API, auth, cases and health checks |
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 
 ```text
 ZERO/
-├── 🐍 app.py              # Main Flask app: UI, REST API, auth, Wazuh integration
-├── 📥 webhook.py          # Wazuh webhook receiver and alert parser
-├── 🔄 main.py             # Poller: webhook → PostgreSQL
-├── 🧩 models.py           # Data models
-├── 🗄️ init.sql            # Database schema / seed data
-├── 🎨 templates/          # Jinja2 templates (dashboard, alerts, systems, health, incidents, login)
-├── 💅 static/css/         # Stylesheets
-├── 🐳 Dockerfile
-├── 🐙 docker-compose.yml
-└── 📦 requirements.txt
+├── app.py              # Main Flask app: UI, REST API, auth, Wazuh integration
+├── webhook.py          # Wazuh webhook receiver and alert parser
+├── main.py             # Poller: webhook -> PostgreSQL
+├── models.py           # Data models
+├── init.sql            # Database schema / seed data
+├── templates/          # Jinja2 templates (dashboard, alerts, systems, health, incidents, login)
+├── static/css/         # Stylesheets
+├── Dockerfile
+├── docker-compose.yml
+└── requirements.txt
 ```
 
 ---
 
-## 🚀 Quick Start
+## Quick Start
 
-### 📋 Prerequisites
+### Prerequisites
 
-- 🐳 [Docker](https://docs.docker.com/get-docker/) & Docker Compose **or** 🐍 Python 3.10+ with PostgreSQL 14+
-- 🛡️ A running Wazuh manager with API access (default port `55000`)
+- [Docker](https://docs.docker.com/get-docker/) and Docker Compose, **or** Python 3.10+ with PostgreSQL 14+
+- A running Wazuh manager with API access (default port `55000`)
 
-### 🐳 Run with Docker
+### Run with Docker
 
 ```bash
 git clone https://github.com/naveen-kumar-2k5/ZERO.git
@@ -116,12 +116,12 @@ cd ZERO
 docker compose up -d --build
 ```
 
-| 🌐 Service | URL |
+| Service | URL |
 |:---|:---|
 | Dashboard / UI | http://localhost:5001 |
 | Webhook receiver | http://localhost:5000 |
 
-### 🔌 Connect Wazuh to ZERO
+### Connect Wazuh to ZERO
 
 Add this to your Wazuh manager's `ossec.conf`:
 
@@ -136,7 +136,7 @@ Add this to your Wazuh manager's `ossec.conf`:
 Then restart the manager: `systemctl restart wazuh-manager`
 
 <details>
-<summary><b>🛠️ Manual setup (without Docker)</b></summary>
+<summary><b>Manual setup (without Docker)</b></summary>
 
 <br/>
 
@@ -154,27 +154,27 @@ psql -U postgres -c "CREATE DATABASE zerorespong_db OWNER zero;"
 psql -U zero -d zerorespong_db -f init.sql
 
 # Run each component in its own terminal
-python webhook.py   # :5000
+python webhook.py   # port 5000
 python main.py      # poller
-python app.py       # :5001
+python app.py       # port 5001
 ```
 
 </details>
 
 ---
 
-## ⚙️ Configuration
+## Configuration
 
 All settings are read from environment variables.
 
 <details>
-<summary><b>🔧 Show all environment variables</b></summary>
+<summary><b>Show all environment variables</b></summary>
 
 <br/>
 
 | Variable | Default | Description |
 |:---|:---|:---|
-| `SECRET_KEY` | `dev-only-secret-key-change-me` | Flask session secret ⚠️ change in production |
+| `SECRET_KEY` | `dev-only-secret-key-change-me` | Flask session secret. Change in production |
 | `PG_HOST` | `localhost` | PostgreSQL host |
 | `PG_PORT` | `5432` | PostgreSQL port |
 | `PG_DB` | `zerorespong_db` | Database name |
@@ -195,7 +195,7 @@ All settings are read from environment variables.
 
 ---
 
-## 📡 API Overview
+## API Overview
 
 > [!NOTE]
 > All `/api/v1/*` endpoints (except login and `/healthz`) require an authenticated session.
@@ -213,55 +213,52 @@ All settings are read from environment variables.
 | ![POST](https://img.shields.io/badge/POST-49cc90?style=flat-square) | `/webhook` *(port 5000)* | Wazuh alert ingestion |
 | ![GET](https://img.shields.io/badge/GET-61affe?style=flat-square) | `/api/v1/alerts` *(port 5000)* | Parsed alerts held by the webhook |
 
-### 🚦 Severity Mapping
+### Severity Mapping
 
 | Wazuh Level | Severity |
 |:---:|:---|
-| `16+` | 🔴 Critical |
-| `14 – 15` | 🟠 High |
-| `12 – 13` | 🟡 Medium |
-| `0 – 11` | 🟢 Low |
+| `16+` | ![Critical](https://img.shields.io/badge/Critical-d73a4a?style=flat-square) |
+| `14 - 15` | ![High](https://img.shields.io/badge/High-f08c00?style=flat-square) |
+| `12 - 13` | ![Medium](https://img.shields.io/badge/Medium-f1c40f?style=flat-square) |
+| `0 - 11` | ![Low](https://img.shields.io/badge/Low-2ea44f?style=flat-square) |
 
-### 🎯 Threat Categories
+### Threat Categories
 
-| Key | Category | Icon |
-|:---:|:---|:---:|
-| `bf` | Brute Force | 🔨 |
-| `pe` | Privilege Escalation | 🪜 |
-| `fim` | File Integrity | 📄 |
-| `ra` | Ransomware | 🔒 |
+| Key | Category |
+|:---:|:---|
+| `bf` | Brute Force |
+| `pe` | Privilege Escalation |
+| `fim` | File Integrity |
+| `ra` | Ransomware |
 
-### 🧭 Incident Case Lifecycle
+### Incident Case Lifecycle
 
 ```mermaid
-stateDiagram-v2
-    [*] --> open
-    open --> investigating
-    investigating --> containing
-    containing --> contained
-    contained --> resolved
-    investigating --> false_positive
-    resolved --> [*]
-    false_positive --> [*]
+flowchart LR
+    A["open"] --> B["investigating"]
+    B --> C["containing"]
+    C --> D["contained"]
+    D --> E["resolved"]
+    B --> F["false-positive"]
 ```
 
 ---
 
-## 🗺️ Pages
+## Pages
 
 | Route | Description |
 |:---|:---|
-| 🔑 `/login` | Sign in |
-| 📊 `/` · `/dashboard` | SOC overview |
-| 🚨 `/alerts` | Searchable alert feed |
-| 🖥️ `/systems` | Monitored endpoints and servers |
-| 💓 `/health` | Platform health |
-| 🗂️ `/incidents` | Incident case list |
-| 🔍 `/incidents/<id>` | Case detail and playbook |
+| `/login` | Sign in |
+| `/` and `/dashboard` | SOC overview |
+| `/alerts` | Searchable alert feed |
+| `/systems` | Monitored endpoints and servers |
+| `/health` | Platform health |
+| `/incidents` | Incident case list |
+| `/incidents/<id>` | Case detail and playbook |
 
 ---
 
-## 🧰 Tech Stack
+## Tech Stack
 
 <div align="center">
 
@@ -271,19 +268,19 @@ stateDiagram-v2
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-Contributions are welcome! 🎉
+Contributions are welcome.
 
-1. 🍴 Fork the repository
-2. 🌿 Create a feature branch: `git checkout -b feature/my-feature`
-3. 💾 Commit your changes: `git commit -m "Add my feature"`
-4. 📤 Push the branch: `git push origin feature/my-feature`
-5. 🔃 Open a Pull Request
+1. Fork the repository
+2. Create a feature branch: `git checkout -b feature/my-feature`
+3. Commit your changes: `git commit -m "Add my feature"`
+4. Push the branch: `git push origin feature/my-feature`
+5. Open a Pull Request
 
 ---
 
-## 📜 License
+## License
 
 No license has been specified yet. Add a `LICENSE` file (for example MIT) to define how others may use this project.
 
@@ -291,11 +288,11 @@ No license has been specified yet. Add a `LICENSE` file (for example MIT) to def
 
 <div align="center">
 
-### 👨‍💻 Author
+### Author
 
-**Naveen Kumar** · [@naveen-kumar-2k5](https://github.com/naveen-kumar-2k5)
+**Naveen Kumar** | [@naveen-kumar-2k5](https://github.com/naveen-kumar-2k5)
 
-⭐ If you find ZERO useful, consider giving it a star!
+If you find ZERO useful, consider giving it a star.
 
 <img src="https://capsule-render.vercel.app/api?type=waving&color=0:2c5364,50:203a43,100:0f2027&height=120&section=footer" alt="footer" width="100%"/>
 
