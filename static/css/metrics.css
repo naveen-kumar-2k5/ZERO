@@ -1,0 +1,112 @@
+/* ==========================================================================
+   ZeroRespond — Statistics / Metrics page
+   Load after zerorespond.css on metrics.html.
+   ========================================================================== */
+
+/* ── Metric cards ────────────────────────────────── */
+.metrics-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:22px}
+.metric-card{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:22px;box-shadow:var(--shadow-sm);
+}
+.metric-val{
+  font-family:var(--font-brand);font-size:28px;font-weight:800;
+  color:var(--text-1);margin-bottom:4px;
+}
+.metric-lbl{font-size:13px;color:var(--text-2);margin-bottom:6px;font-weight:500}
+.metric-ctx{font-size:12.5px;color:var(--text-3);line-height:1.45}
+.metric-trend{font-size:12px;color:#16a34a;font-weight:600;margin-top:8px}
+
+/* ── Chart wrap ──────────────────────────────────── */
+.charts-wrap{display:grid;grid-template-columns:1fr;gap:18px;margin-bottom:18px}
+.chart-2{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.chart-card{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:20px;box-shadow:var(--shadow-sm);
+}
+.chart-title{font-size:14px;font-weight:600;color:var(--text-1);margin-bottom:3px}
+.chart-sub{font-size:12.5px;color:var(--text-3);margin-bottom:16px}
+
+/* ── Workflow summary cards ──────────────────────── */
+.workflow-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.workflow-card{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-md);padding:16px 18px;box-shadow:var(--shadow-sm);
+}
+.workflow-card-label{
+  font-size:10.5px;font-weight:700;text-transform:uppercase;
+  letter-spacing:.55px;color:var(--text-3);margin-bottom:5px;
+}
+.workflow-card-value{font-family:var(--font-brand);font-size:24px;font-weight:800;color:var(--text-1)}
+.workflow-card-meta{font-size:12px;color:var(--text-3);margin-top:3px}
+
+/* ── Workflow strip (5 steps) ────────────────────── */
+.workflow-strip{
+  display:grid;grid-template-columns:repeat(5,1fr);
+  border:1px solid var(--border);background:var(--bg-surface);
+  border-radius:var(--r-md);overflow:hidden;box-shadow:var(--shadow-sm);
+}
+.workflow-step{
+  padding:15px 12px;border-right:1px solid var(--border);
+  position:relative;cursor:pointer;text-align:center;
+}
+.workflow-step:last-child{border-right:none}
+.workflow-step:hover{background:var(--accent-light)}
+.workflow-step-num{
+  width:26px;height:26px;border:1px solid var(--border-2);border-radius:50%;
+  display:flex;align-items:center;justify-content:center;margin:0 auto 7px;font-family:var(--font-brand);font-size:11px;
+  font-weight:700;color:var(--text-2);background:var(--bg-surface);
+}
+.workflow-step.active .workflow-step-num{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+}
+.workflow-step-title{
+  font-size:11.5px;font-weight:700;color:var(--text-1);
+  text-transform:uppercase;letter-spacing:.35px;
+}
+.workflow-step-desc{font-size:10.5px;color:var(--text-3);margin-top:2px}
+
+/* ── Lifecycle banner (Detect / Respond / Report / Repeat) ── */
+.lifecycle-banner{
+  display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+  margin-bottom:22px;background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);overflow:hidden;box-shadow:var(--shadow-sm);
+}
+.lc-stage{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:16px 12px;cursor:pointer;transition:background .14s;
+  position:relative;text-align:center;
+}
+.lc-stage:not(:last-child){border-right:1px solid var(--border)}
+.lc-arrow{
+  position:absolute;right:-12px;top:50%;width:24px;height:24px;
+  display:flex;align-items:center;justify-content:center;
+  transform:translateY(-50%);color:var(--border-2);
+  background:var(--bg-surface);border-radius:50%;z-index:3;pointer-events:none;
+}
+.lc-arrow .ui-icon{width:15px;height:15px}
+.lc-stage.active .lc-arrow{color:var(--accent);background:var(--accent-light)}
+.lc-stage:hover{background:var(--accent-light)}
+.lc-stage.active{background:var(--accent-light)}
+.lc-stage.active .lc-label{color:var(--accent)}
+.lc-stage.active .lc-module{color:var(--accent);opacity:.8}
+.lc-icon{font-size:22px;margin-bottom:6px}
+.lc-label{font-family:var(--font-brand);font-size:13px;font-weight:700;color:var(--text-1);margin-bottom:3px}
+.lc-desc{font-size:11px;color:var(--text-3);margin-bottom:4px}
+.lc-module{
+  font-size:10px;font-weight:700;font-family:var(--font-brand);
+  color:var(--text-3);letter-spacing:.4px;text-transform:uppercase;
+}
+
+/* ── Responsive ──────────────────────────────────── */
+@media(max-width:900px){
+  .metrics-grid{grid-template-columns:1fr}
+  .chart-2{grid-template-columns:1fr}
+  .workflow-summary{grid-template-columns:repeat(2,1fr)}
+}
+@media(max-width:620px){
+  .workflow-summary{grid-template-columns:1fr 1fr}
+  .workflow-strip{grid-template-columns:1fr}
+  .workflow-step{border-right:none;border-bottom:1px solid var(--border)}
+  .workflow-step:last-child{border-bottom:none}
+}

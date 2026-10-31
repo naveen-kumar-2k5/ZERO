@@ -1,0 +1,94 @@
+/* ==========================================================================
+   ZeroRespond — Monitored Systems page
+   Load after zerorespond.css on systems.html.
+   ========================================================================== */
+
+/* ── Status row (3 stat cards) ───────────────────── */
+.sys-status-row{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:20px}
+.sys-stat-card{
+  background:var(--bg-surface);border:1px solid var(--border);border-radius:var(--r-lg);
+  padding:16px 20px;box-shadow:var(--shadow-sm);display:flex;align-items:center;gap:14px;
+}
+.sys-stat-icon{width:28px;height:28px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.sys-stat-icon .ui-icon{width:24px;height:24px;stroke-width:2}
+.sys-stat-val{font-family:var(--font-brand);font-size:24px;font-weight:800;color:var(--text-1)}
+.sys-stat-lbl{font-size:12.5px;color:var(--text-2)}
+.sys-online{color:var(--c-low)}
+.sys-offline{color:var(--c-critical)}
+.sys-warning{color:var(--c-high)}
+
+/* ── Type badges ─────────────────────────────────── */
+.sys-type-badge{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 6px;
+  border-radius:3px;font-size:11.5px;font-weight:600;font-family:var(--font-brand);
+  white-space:nowrap;border-left:3px solid;
+}
+.sys-type-badge.endpoint  {background:#f1f3f5;color:#374151;border-left-color:#6b7280}
+.sys-type-badge.server    {background:#f0f4f8;color:#1e3a5f;border-left-color:#4b7ab0}
+.sys-type-badge.cloud     {background:#eef4fb;color:#1a4e7a;border-left-color:#c81e2b}
+.sys-type-badge.fileserver{background:#f5f3f1;color:#44372a;border-left-color:#a87c50}
+.sys-type-badge.database  {background:#f1f1f5;color:#312e5e;border-left-color:#6b66a8}
+
+/* ── Status pills ────────────────────────────────── */
+.sys-status-pill{
+  display:inline-flex;align-items:center;gap:5px;font-size:12px;
+  font-weight:600;font-family:var(--font-brand);
+}
+.sys-status-pill.online {color:var(--c-low)}
+.sys-status-pill.offline{color:var(--c-critical)}
+.sys-status-pill.warning{color:var(--c-high)}
+.sys-status-pill .ui-icon{width:15px;height:15px;stroke-width:2}
+
+.sys-pulse{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.sys-pulse.online {background:var(--c-low);animation:pulse-g 2s infinite}
+.sys-pulse.offline{background:var(--c-critical)}
+.sys-pulse.warning{background:var(--c-high);animation:pulse-amber 1.5s infinite}
+
+@keyframes pulse-g{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes pulse-amber{0%,100%{box-shadow:0 0 0 0 rgba(217,119,6,.4)}50%{box-shadow:0 0 0 5px rgba(217,119,6,0)}}
+
+/* ── Last-log aging ──────────────────────────────── */
+.last-log-time{font-family:var(--font-brand);font-size:12px;color:var(--text-3)}
+.last-log-time.stale{color:var(--c-high);font-weight:600}
+.last-log-time.dead {color:var(--c-critical);font-weight:600}
+
+/* ── Alerts-today cell ───────────────────────────── */
+.alerts-today-cell{font-size:13px;font-weight:600}
+.alerts-today-cell.clean{color:var(--c-low)}
+.alerts-today-cell.has-critical{color:var(--c-critical)}
+.alerts-today-cell.has-high{color:var(--c-high)}
+.alerts-today-cell.has-medium{color:var(--c-medium)}
+
+/* ── Wazuh connection bar ────────────────────────── */
+.wazuh-status-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px;border-radius:var(--r-md);margin-bottom:20px;
+  font-size:13.5px;flex-wrap:wrap;gap:10px;
+  background:var(--c-low-bg);border:1px solid var(--c-low-border);
+}
+.wazuh-status-bar.demo {background:var(--c-high-bg);border-color:var(--c-high-border)}
+.wazuh-status-bar.error{background:var(--c-critical-bg);border-color:var(--c-critical-border)}
+.wazuh-info{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+.last-sync{font-size:12px;color:var(--text-3);font-family:var(--font-brand)}
+
+/* ── Toolbar ─────────────────────────────────────── */
+.systems-toolbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+.systems-toolbar .fselect,
+.systems-toolbar .finput{
+  padding:7px 12px;border-radius:var(--r-sm);border:1px solid var(--border-2);
+  background:var(--bg-surface);font-family:var(--font-ui);font-size:13px;
+  color:var(--text-1);outline:none;
+}
+.systems-toolbar .finput{min-width:220px}
+.systems-toolbar .finput:focus,
+.systems-toolbar .fselect:focus{
+  border-color:var(--accent);box-shadow:0 0 0 3px rgba(200,30,43,.1);
+}
+
+/* ── Spinner ─────────────────────────────────────── */
+.spin{
+  display:inline-block;width:13px;height:13px;border:2px solid var(--border-2);
+  border-top-color:var(--accent);border-radius:50%;
+  animation:spin .8s linear infinite;vertical-align:-2px;margin-right:6px;
+}
+@keyframes spin{to{transform:rotate(360deg)}}

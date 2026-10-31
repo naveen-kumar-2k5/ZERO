@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Audit Log</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/report.css') }}">
+
+  <style>
+    /* ── Audit rows ──────────────────────────────────── */
+    .audit-row{
+      display:grid;
+      grid-template-columns:150px 170px 1fr 140px;
+      gap:12px;align-items:center;
+      padding:11px 14px;border-bottom:1px solid var(--border);
+      font-size:12.5px;
+    }
+    .audit-row:last-child{border-bottom:none}
+    .audit-row:hover{background:var(--accent-light)}
+    .audit-time{
+      font-family:var(--font-brand);color:var(--text-3);
+      font-size:12px;white-space:nowrap;
+    }
+    .audit-action{font-weight:700;color:var(--text-1)}
+    .audit-detail{
+      color:var(--text-2);font-size:13px;
+      overflow:hidden;text-overflow:ellipsis;
+    }
+    .audit-detail strong{color:var(--text-1);font-family:var(--font-code);font-weight:600}
+    .audit-actor{
+      justify-self:start;
+      font-size:11px;font-weight:700;
+      padding:2px 8px;border-radius:10px;
+      background:var(--bg-base);color:var(--text-2);
+      border:1px solid var(--border);
+      white-space:nowrap;
+    }
+    .audit-actor.system{background:#eff6ff;color:#1e40af;border-color:#bfdbfe}
+    .audit-actor.wazuh{background:#fef3c7;color:#92400e;border-color:#fde68a}
+
+    /* ── Toolbar ────────────────────────────────────── */
+    .audit-toolbar{
+      display:flex;align-items:center;gap:10px;
+      flex-wrap:wrap;margin-bottom:14px;
+    }
+    .audit-toolbar .finput{min-width:220px}
+
+    /* ── Report History table ───────────────────────── */
+    .report-history-row{
+      display:grid;
+      grid-template-columns:170px 100px 1fr 180px 130px;
+      gap:12px;align-items:center;
+      padding:12px 16px;border-bottom:1px solid var(--border);
+      font-size:12.5px;
+    }
+    .report-history-row:last-child{border-bottom:none}
+    .report-history-row strong{font-family:var(--font-brand);color:var(--text-1)}
+
+    /* ── Responsive ─────────────────────────────────── */
+    @media(max-width:800px){
+      .audit-row{grid-template-columns:1fr 1fr;gap:4px}
+      .audit-detail{grid-column:1/-1;white-space:normal}
+      .report-history-row{grid-template-columns:1fr 1fr}
+    }
+  </style>
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item active" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Audit Log</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<main id="content">
+
+  <div class="page-hd">
+    <h1>Audit Log</h1>
+    <p>Recorded actions across incident cases, evidence, response steps, and reporting.</p>
+  </div>
+
+  <div class="card">
+    <div class="card-hd">
+      <span class="card-title"><i data-lucide="scroll-text" class="ui-icon"></i> Recent Activity</span>
+      <span style="font-size:12.5px;color:var(--text-3)" id="audit-count">—</span>
+    </div>
+
+    <div class="audit-toolbar">
+      <input class="finput" type="text" id="audit-search" placeholder="Search actions, refs, details…" oninput="debouncedLoad()">
+      <select class="fselect" id="audit-filter-actor" onchange="loadAudit()">
+        <option value="">All users</option>
+        <option value="System">System</option>
+        <option value="IT Team">IT Team</option>
+        <option value="Naveen Kumar">Naveen Kumar</option>
+        <option value="Ragul">Ragul</option>
+        <option value="Manikandan">Manikandan</option>
+        <option value="Prithiv Raj">Prithiv Raj</option>
+      </select>
+      <button class="btn btn-secondary btn-sm" onclick="loadAudit()">
+        <i data-lucide="refresh-cw" class="ui-icon"></i> Refresh
+      </button>
+      <button class="btn btn-secondary btn-sm" onclick="exportAuditCsv()">
+        <i data-lucide="download" class="ui-icon"></i> Export CSV
+      </button>
+    </div>
+
+    <div id="audit-list">
+      <div style="padding:32px;text-align:center;color:var(--text-3)">
+        <span class="spin"></span>Loading audit log…
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════ Report History ══════ -->
+  <div class="card" style="margin-top:20px;padding:0;overflow:hidden">
+    <div class="card-hd" style="padding:20px 20px 0;margin-bottom:8px">
+      <span class="card-title"><i data-lucide="file-text" class="ui-icon"></i> Report History</span>
+      <a class="btn btn-ghost btn-sm" href="/report">
+        <i data-lucide="plus" class="ui-icon"></i> Generate new
+      </a>
+    </div>
+    <div id="report-history-list">
+      <div style="padding:24px;text-align:center;color:var(--text-3)">
+        <span class="spin"></span>Loading reports…
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Icons + clock ─────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Audit loader ─────────────────────────────────────
+let DEBOUNCE = null;
+let CACHED_AUDIT = [];
+
+function debouncedLoad() {
+  clearTimeout(DEBOUNCE);
+  DEBOUNCE = setTimeout(loadAudit, 300);
+}
+
+async function loadAudit() {
+  const el = document.getElementById('audit-list');
+  const q = document.getElementById('audit-search').value.trim();
+  const actor = document.getElementById('audit-filter-actor').value;
+
+  const p = new URLSearchParams();
+  if (q)     p.set('q', q);
+  if (actor) p.set('actor', actor);
+  p.set('limit', '500');
+
+  try {
+    const r = await fetch('/api/v1/audit?' + p.toString(), { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    CACHED_AUDIT = body.data || [];
+    renderAudit(CACHED_AUDIT);
+  } catch (err) {
+    el.innerHTML = `<div style="padding:32px;text-align:center;color:var(--c-critical)">
+      <i data-lucide="circle-x" class="ui-icon" style="width:32px;height:32px"></i>
+      <div style="margin-top:10px;font-weight:700;font-size:15px">Could not load audit log</div>
+      <div style="font-size:13px;color:var(--text-3);margin-top:6px">${escapeHtml(err.message)}</div>
+    </div>`;
+    refreshIcons(el);
+  }
+}
+
+function renderAudit(rows) {
+  const el = document.getElementById('audit-list');
+  document.getElementById('audit-count').textContent =
+    rows.length ? `${rows.length} entr${rows.length === 1 ? 'y' : 'ies'}` : '';
+
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty-state">
+      <i data-lucide="scroll-text" class="ui-icon"></i>
+      <div class="empty-state-title">No audit entries${hasFilter() ? ' match your filter' : ' yet'}</div>
+      <div class="empty-state-sub">${hasFilter() ? 'Try clearing the filter above.' : 'Actions on cases, evidence, and reports appear here.'}</div>
+    </div>`;
+    refreshIcons(el);
+    return;
+  }
+
+  el.innerHTML = rows.map(r => {
+    const actorCls = (r.actor || '').toLowerCase() === 'system' ? 'system'
+                    : (r.actor || '').toLowerCase() === 'wazuh' ? 'wazuh' : '';
+    const refHtml = r.ref ? `<strong>${escapeHtml(r.ref)}</strong>` : '';
+    const detailHtml = r.detail ? ` — ${escapeHtml(r.detail)}` : '';
+    return `<div class="audit-row">
+      <span class="audit-time">${escapeHtml(r.createdAtIst)}</span>
+      <span class="audit-action">${escapeHtml(r.action)}</span>
+      <span class="audit-detail">${refHtml}${detailHtml}</span>
+      <span class="audit-actor ${actorCls}">${escapeHtml(r.actor || 'System')}</span>
+    </div>`;
+  }).join('');
+  refreshIcons(el);
+}
+
+function hasFilter() {
+  return document.getElementById('audit-search').value.trim()
+      || document.getElementById('audit-filter-actor').value;
+}
+
+// ── CSV export ────────────────────────────────────────
+function exportAuditCsv() {
+  if (!CACHED_AUDIT.length) {
+    alert('No audit entries to export.');
+    return;
+  }
+  const header = ['Timestamp', 'Action', 'Reference', 'Detail', 'Actor'];
+  const rows = CACHED_AUDIT.map(r => [
+    r.createdAtIst,
+    r.action,
+    r.ref || '',
+    r.detail || '',
+    r.actor || 'System',
+  ]);
+  const csv = [header, ...rows]
+    .map(row => row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `ZeroRespond-audit-${Date.now()}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Report history (reuses /api/v1/reports) ──────────
+async function loadReportHistory() {
+  const el = document.getElementById('report-history-list');
+  try {
+    const r = await fetch('/api/v1/reports', { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    const rows = body.data || [];
+
+    if (!rows.length) {
+      el.innerHTML = `<div class="empty-state">
+        <i data-lucide="file-text" class="ui-icon"></i>
+        <div class="empty-state-title">No reports generated yet</div>
+        <div class="empty-state-sub">Complete a playbook and generate a report to see it here.</div>
+      </div>`;
+    } else {
+      el.innerHTML = rows.map(row => `
+        <div class="report-history-row">
+          <strong>${escapeHtml(row.reportRef)}</strong>
+          <span style="font-family:var(--font-code);color:var(--text-2)">${escapeHtml(row.caseRef)}</span>
+          <span>${escapeHtml(row.threatType)}</span>
+          <span style="color:var(--text-3)">${escapeHtml(row.generatedAtIst)}</span>
+          <span class="status-chip status-resolved" style="justify-self:start">
+            <i data-lucide="circle-check" class="ui-icon"></i> Generated
+          </span>
+        </div>`).join('');
+    }
+    refreshIcons(el);
+  } catch (err) {
+    el.innerHTML = `<div style="padding:24px;text-align:center;color:var(--c-critical)">
+      <strong>Could not load report history</strong><br>
+      <span style="font-size:13px;color:var(--text-3)">${escapeHtml(err.message)}</span>
+    </div>`;
+  }
+}
+
+// ── Escaping ──────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Boot ─────────────────────────────────────────────
+loadAudit();
+loadReportHistory();
+setInterval(() => {
+  const focused = document.activeElement === document.getElementById('audit-search');
+  if (!focused) loadAudit();
+}, 30000);
+</script>
+</body>
+</html>

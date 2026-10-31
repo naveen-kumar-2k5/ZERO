@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Response Playbooks</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/incidents.css') }}">
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item active" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Response Playbooks</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<main id="content">
+
+  <div class="page-hd">
+    <h1>Response Playbooks</h1>
+    <p>Structured response procedures for the incident types supported by ZeroRespond.</p>
+  </div>
+
+  <div class="info-banner">
+    <i data-lucide="list-checks" class="ui-icon"></i>
+    Each playbook provides ordered response steps, platform-specific commands, expected results, and a record of completed actions.
+  </div>
+
+  <div class="playbook-library" id="playbook-library">
+    <div style="grid-column:1/-1;padding:48px;text-align:center;color:var(--text-3)">
+      <span class="spin"></span>Loading playbooks…
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Icons ─────────────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+// ── Clock ─────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Icon + label per playbook key ─────────────────────
+const PB_ICON = {
+  ransomware:    'lock',
+  bruteforce:    'key-round',
+  privilege:     'arrow-up',
+  fileintegrity: 'folder',
+};
+const SEV_LABEL = { critical:'Critical', high:'High', medium:'Medium', low:'Low' };
+
+// ── Loader ────────────────────────────────────────────
+async function loadPlaybooks() {
+  const libEl = document.getElementById('playbook-library');
+  try {
+    const r = await fetch('/api/v1/playbooks', { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    renderLibrary(body.data || []);
+  } catch (err) {
+    libEl.innerHTML = `
+      <div style="grid-column:1/-1;padding:48px;text-align:center;color:var(--c-critical)">
+        <i data-lucide="circle-x" class="ui-icon" style="width:36px;height:36px"></i>
+        <div style="margin-top:10px;font-weight:700;font-size:15px">Could not load playbooks</div>
+        <div style="font-size:13px;color:var(--text-3);margin-top:6px">${escapeHtml(err.message)}</div>
+        <div style="margin-top:14px">
+          <a href="/health" class="btn btn-secondary btn-sm">
+            <i data-lucide="activity" class="ui-icon"></i> Check API health
+          </a>
+        </div>
+      </div>`;
+    refreshIcons(libEl);
+  }
+}
+
+function renderLibrary(items) {
+  const libEl = document.getElementById('playbook-library');
+  if (!items.length) {
+    libEl.innerHTML = '<div style="grid-column:1/-1;padding:48px;text-align:center;color:var(--text-3)">No playbooks defined.</div>';
+    return;
+  }
+
+  libEl.innerHTML = items.map(pb => {
+    const icon = PB_ICON[pb.key] || 'list-checks';
+    const hasCase = !!pb.currentCase;
+    const clickAction = hasCase
+      ? `window.location='/incidents/${pb.currentCase.id}'`
+      : `openEmptyPlaybook('${pb.key}')`;
+
+    const footerLeft = hasCase
+      ? `Active case <strong>${escapeHtml(pb.currentCase.caseRef)}</strong>
+         <span class="badge ${pb.currentCase.severity}"
+               style="margin-left:6px;font-size:10px;padding:1px 6px">
+           <span class="bdot"></span>${SEV_LABEL[pb.currentCase.severity] || pb.currentCase.severity}
+         </span>`
+      : `<span style="color:var(--text-3)">No active case</span>`;
+
+    const footerRight = hasCase
+      ? `<span style="color:var(--accent);font-weight:600">Open response <i data-lucide="arrow-right" class="ui-icon"></i></span>`
+      : `<span style="color:var(--text-3)">View procedure <i data-lucide="arrow-right" class="ui-icon"></i></span>`;
+
+    return `
+      <div class="playbook-card" onclick="${clickAction}">
+        <div class="playbook-card-top">
+          <div class="playbook-card-icon"><i data-lucide="${icon}" class="ui-icon"></i></div>
+          <div style="flex:1;min-width:0">
+            <div class="playbook-card-title">${escapeHtml(pb.name)}</div>
+            <div class="playbook-card-meta">
+              ${pb.stepCount} response steps
+              ${pb.totalCases > 0
+                ? ` · <strong>${pb.totalCases}</strong> case${pb.totalCases === 1 ? '' : 's'} total`
+                : ''}
+            </div>
+          </div>
+        </div>
+        <div class="playbook-card-desc">${escapeHtml(pb.description)}</div>
+        <div class="playbook-card-footer">
+          <span>${footerLeft}</span>
+          ${footerRight}
+        </div>
+      </div>`;
+  }).join('');
+
+  refreshIcons(libEl);
+}
+
+function openEmptyPlaybook(key) {
+  alert(
+    'This playbook has no active case right now.\n\n' +
+    'To use it: open Incident Cases, click "Report New Incident", choose the matching attack type, ' +
+    'and the response steps will become available.'
+  );
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Boot ─────────────────────────────────────────────
+loadPlaybooks();
+setInterval(loadPlaybooks, 30000);
+</script>
+</body>
+</html>

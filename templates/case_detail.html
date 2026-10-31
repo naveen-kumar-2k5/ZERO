@@ -1,0 +1,494 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Case Detail</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/incidents.css') }}">
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item active" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Case Detail</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<main id="content">
+  <div id="case-root">
+    <div style="padding:64px 20px;text-align:center;color:var(--text-3)">
+      <span class="spin"></span>Loading case…
+    </div>
+  </div>
+</main>
+
+<!-- Evidence modal -->
+<div id="evidence-modal" class="modal-overlay" style="display:none"
+     onclick="if (event.target === this) closeEvidenceModal()">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-hd">
+      <span class="modal-title"><i data-lucide="paperclip" class="ui-icon"></i> Add Evidence</span>
+      <button class="modal-close" onclick="closeEvidenceModal()">&times;</button>
+    </div>
+    <div class="modal-body">
+      <div class="info-banner" style="margin-bottom:14px">
+        <i data-lucide="info" class="ui-icon"></i>
+        Demo mode: only the filename is stored in the case record — no file bytes are uploaded.
+      </div>
+      <div class="form-group">
+        <label class="form-label">Filename *</label>
+        <input class="form-input" id="ev-filename" placeholder="e.g. screenshot_desktop.png">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Evidence type</label>
+        <select class="form-select" id="ev-kind">
+          <option>Screenshot</option>
+          <option>Log File</option>
+          <option>Network Capture</option>
+          <option>Memory Dump</option>
+          <option>Document / Report</option>
+          <option selected>Other</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Notes (optional)</label>
+        <textarea class="form-textarea" id="ev-notes" placeholder="What does this file show?"></textarea>
+      </div>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-secondary" onclick="closeEvidenceModal()">Cancel</button>
+      <button class="btn btn-primary" onclick="attachEvidence()">
+        <i data-lucide="paperclip" class="ui-icon"></i> Attach to Case
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+const CASE_ID = {{ case_id }};
+let CASE = null;
+let CUR_PLATFORM = 'linux';
+const OPEN_STEPS = new Set();   // indices whose .step-body is expanded
+
+// ── icons ────────────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+// ── clock ────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── load ─────────────────────────────────────────────
+async function loadCase() {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    CASE = body.data;
+    render();
+  } catch (err) {
+    document.getElementById('case-root').innerHTML = `
+      <div style="padding:48px 20px;text-align:center;color:var(--c-critical)">
+        <i data-lucide="circle-x" class="ui-icon" style="width:40px;height:40px"></i>
+        <div style="margin-top:10px;font-weight:700;font-size:15px">Could not load case</div>
+        <div style="font-size:13px;color:var(--text-3);margin-top:6px">${escapeHtml(err.message)}</div>
+        <div style="margin-top:14px"><a href="/incidents" class="btn btn-secondary btn-sm"><i data-lucide="arrow-left" class="ui-icon"></i> Back to Incidents</a></div>
+      </div>`;
+    refreshIcons(document.getElementById('case-root'));
+  }
+}
+
+// ── render ───────────────────────────────────────────
+function render() {
+  const c = CASE;
+  if (!c) return;
+
+  if (!c.playbook) {
+    document.getElementById('case-root').innerHTML =
+      `<div style="padding:32px;text-align:center;color:var(--text-3)">No playbook defined for this case.</div>`;
+    return;
+  }
+
+  const pb       = c.playbook;
+  const total    = c.totalSteps;
+  const cur      = c.curStep;
+  const pct      = total ? Math.round((cur / total) * 100) : 0;
+  const sevLbl   = { critical:'Critical', high:'High', medium:'Medium', low:'Low' }[c.severity] || c.severity;
+  const stLbl    = { 'open':'Open','investigating':'Investigating','containing':'Containing',
+                     'contained':'Contained','resolved':'Resolved','false-positive':'False Positive' }[c.status] || c.status;
+
+  // ── header block ──
+  const headerHtml = `
+    <button class="back-btn" onclick="window.location='/incidents'">
+      <i data-lucide="arrow-left" class="ui-icon"></i> Back to Incident Cases
+    </button>
+    <div class="case-hd-block">
+      <div class="case-hd-top">
+        <div>
+          <div class="case-title-row">
+            <span class="case-id">${escapeHtml(c.caseRef)}</span>
+            <span class="badge ${c.severity}"><span class="bdot"></span>${sevLbl}</span>
+            <span style="font-size:15px;font-weight:700;color:var(--text-1)">${escapeHtml(c.threatType)} Response</span>
+          </div>
+          <div class="case-meta">
+            <span><i data-lucide="user" class="ui-icon"></i> ${escapeHtml(c.assignedTo || 'Unassigned')}</span>
+            <span><i data-lucide="laptop" class="ui-icon"></i> ${escapeHtml(c.agent || 'unknown')}</span>
+            <span><i data-lucide="clock-3" class="ui-icon"></i> Opened ${escapeHtml(c.openedAtIst || '—')}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-shrink:0">
+          <span style="font-size:12.5px;color:var(--text-2)">Status:</span>
+          <select class="status-sel" onchange="updateStatus(this.value)">
+            ${['open','investigating','containing','contained','resolved','false-positive']
+              .map(k => `<option value="${k}" ${c.status === k ? 'selected' : ''}>${({
+                'open':'Open','investigating':'Investigating','containing':'Containing',
+                'contained':'Contained','resolved':'Resolved','false-positive':'False Positive'
+              })[k]}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="case-desc"><i data-lucide="triangle-alert" class="ui-icon"></i> ${escapeHtml(c.description || '')}</div>
+    </div>`;
+
+  // ── step dots ──
+  const dots = pb.steps.map((_, i) => {
+    const st = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+    const lbl = i < cur ? '<i data-lucide="check" class="ui-icon"></i>' : (i + 1);
+    const conn = i < pb.steps.length - 1
+      ? `<div class="step-conn ${i < cur ? 'done' : ''}"></div>` : '';
+    return `<div class="step-dot-wrap"><div class="step-dot ${st}">${lbl}</div>${conn}</div>`;
+  }).join('');
+
+  const progressHtml = `
+    <div class="step-prog">
+      <div class="step-dots">${dots}</div>
+      <div class="prog-bar-wrap">
+        <div class="prog-bar"><div class="prog-bar-fill" style="width:${pct}%"></div></div>
+        <span class="prog-label">Step ${Math.min(cur + 1, total)} of ${total} — ${pct}% complete</span>
+      </div>
+    </div>`;
+
+  // ── playbook steps ──
+  const stepsHtml = pb.steps.map((s, i) => {
+    const st = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+    const isOpen = (st === 'active') || OPEN_STEPS.has(i);
+    const cmd = CUR_PLATFORM === 'linux' ? s.linux : s.windows;
+    const doneLbl = st === 'done'
+      ? `<span class="step-done-lbl"><i data-lucide="check" class="ui-icon"></i> Done</span>`
+      : '';
+
+    return `
+      <div class="pb-step ${st}" id="pbstep-${i}">
+        <div class="step-hd" onclick="toggleStep(${i})">
+          <div class="step-num">${st === 'done' ? '<i data-lucide="check" class="ui-icon"></i>' : (i + 1)}</div>
+          <div class="step-title-txt">Step ${i + 1}: ${escapeHtml(s.title)}</div>
+          ${doneLbl}
+        </div>
+        <div class="step-body" style="display:${isOpen ? 'block' : 'none'}">
+          <p class="step-plain">${escapeHtml(s.plain)}</p>
+          <div class="plat-toggle">
+            <button class="plat-btn ${CUR_PLATFORM === 'linux' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); setPlatform('linux', ${i})">
+              <i data-lucide="terminal" class="ui-icon"></i> Linux
+            </button>
+            <button class="plat-btn ${CUR_PLATFORM === 'windows' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); setPlatform('windows', ${i})">
+              <i data-lucide="app-window" class="ui-icon"></i> Windows
+            </button>
+          </div>
+          <div class="code-block">
+            <button class="copy-btn" onclick="event.stopPropagation(); copyCmd(${i})">
+              <i data-lucide="clipboard-list" class="ui-icon"></i> Copy
+            </button>
+            <pre>${escapeHtml(cmd || '')}</pre>
+          </div>
+          <div class="step-expected">
+            <div class="exp-lbl"><i data-lucide="circle-check" class="ui-icon"></i> What you should see:</div>
+            ${escapeHtml(s.expected)}
+          </div>
+          <div class="step-actions-row">
+            ${st === 'active'
+              ? `<button class="btn btn-success" onclick="event.stopPropagation(); completeStep(${i})">
+                   <i data-lucide="check" class="ui-icon"></i> Done — Next Step
+                 </button>`
+              : st === 'done' && i === cur - 1
+                ? `<button class="btn btn-ghost btn-sm"
+                           style="color:var(--c-high);border-color:var(--c-high-border)"
+                           onclick="event.stopPropagation(); undoStep(${i})">
+                     <i data-lucide="undo-2" class="ui-icon"></i> Undo step
+                   </button>`
+                : ''}
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+
+  const reportBtn = cur >= total
+    ? `<button class="btn btn-primary btn-sm" onclick="window.location='/report?case=${CASE_ID}'">
+         <i data-lucide="file-text" class="ui-icon"></i> Generate Report
+       </button>`
+    : `<button class="btn btn-secondary btn-sm"
+               onclick="alert('Complete all response steps before generating the incident report.')">
+         <i data-lucide="lock" class="ui-icon"></i> Complete all steps to generate report
+       </button>`;
+
+  const playbookHtml = `
+    <div class="pb-card">
+      <div class="pb-hd">
+        <span class="pb-name"><i data-lucide="book-open" class="ui-icon"></i> ${escapeHtml(pb.name)}</span>
+        ${reportBtn}
+      </div>
+      ${stepsHtml}
+    </div>`;
+
+  // ── right rail: timeline + evidence + details ──
+  const timelineHtml = c.events.length
+    ? c.events.map(e => {
+        const type = e.kind === 'step_done' || e.kind === 'opened' || e.kind === 'status_change'
+          ? 'done'
+          : e.kind === 'step_undo'
+            ? 'active'
+            : 'done';
+        const t = e.createdAtIst ? e.createdAtIst.split(', ')[1] || '' : '';
+        return `
+          <div class="tl-item">
+            <span class="tl-time">${escapeHtml(t.split(' IST')[0] || '—')}</span>
+            <div class="tl-dot ${type}"></div>
+            <span class="tl-action">${escapeHtml(e.message)}</span>
+          </div>`;
+      }).join('')
+    : '<div style="font-size:13px;color:var(--text-3)">No events recorded.</div>';
+
+  const evidenceHtml = c.evidence.length
+    ? c.evidence.map(ev => `
+        <div class="ev-item">
+          <span class="ev-icon"><i data-lucide="paperclip" class="ui-icon"></i></span>
+          <span class="ev-name">${escapeHtml(ev.filename)}</span>
+          <span style="font-size:11px;color:var(--text-3)">${escapeHtml(ev.kind)}</span>
+        </div>`).join('')
+    : '<div style="font-size:13px;color:var(--text-3)">No evidence uploaded yet.</div>';
+
+  const rightHtml = `
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">
+        <i data-lucide="clock-3" class="ui-icon"></i> Incident Timeline
+      </div>
+      <div class="timeline-list">${timelineHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">
+          <i data-lucide="paperclip" class="ui-icon"></i>
+          Evidence (${c.evidence.length})
+        </span>
+        <button class="btn btn-secondary btn-sm" onclick="openEvidenceModal()">
+          <i data-lucide="plus" class="ui-icon"></i> Add evidence
+        </button>
+      </div>
+      <div class="ev-list">${evidenceHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">
+        <i data-lucide="file-text" class="ui-icon"></i> Incident Details
+      </div>
+      <div class="dpdp-fields">
+        <div class="dpdp-row"><span class="dpdp-lbl">Attack type</span><span class="dpdp-val">${escapeHtml(c.threatType)}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Computer</span><span class="dpdp-val">${escapeHtml(c.agent || '—')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Source IP</span><span class="dpdp-val">${escapeHtml(c.sourceIp || '—')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Data at risk</span><span class="dpdp-val">${escapeHtml(c.dataCategories || '—')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">People affected</span><span class="dpdp-val">~${c.personsAffected || 0}</span></div>
+      </div>
+      <div class="divider"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="window.location='/report?case=${CASE_ID}'">
+        <i data-lucide="file-text" class="ui-icon"></i> Generate Incident Report
+      </button>
+    </div>`;
+
+  document.getElementById('case-root').innerHTML = `
+    ${headerHtml}
+    ${progressHtml}
+    <div class="case-grid">
+      <div>${playbookHtml}</div>
+      <div class="case-right">${rightHtml}</div>
+    </div>`;
+
+  refreshIcons(document.getElementById('case-root'));
+}
+
+// ── interactions ─────────────────────────────────────
+function toggleStep(i) {
+  const el = document.getElementById('pbstep-' + i);
+  if (!el) return;
+  const body = el.querySelector('.step-body');
+  if (!body) return;
+  const isDone = el.classList.contains('done');
+  if (isDone) return; // done steps don't expand
+  const wasOpen = body.style.display === 'block';
+  if (wasOpen) { OPEN_STEPS.delete(i); body.style.display = 'none'; }
+  else { OPEN_STEPS.add(i); body.style.display = 'block'; }
+}
+
+function setPlatform(platform, i) {
+  CUR_PLATFORM = platform;
+  render();
+  // Keep the step body open after re-render
+  OPEN_STEPS.add(i);
+  const body = document.querySelector('#pbstep-' + i + ' .step-body');
+  if (body) body.style.display = 'block';
+}
+
+async function copyCmd(i) {
+  const step = CASE.playbook.steps[i];
+  const text = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
+  try {
+    await navigator.clipboard.writeText(text || '');
+    const btn = document.querySelectorAll('.copy-btn')[i];
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i data-lucide="check" class="ui-icon"></i> Copied';
+      refreshIcons(btn);
+      setTimeout(() => { btn.innerHTML = orig; refreshIcons(btn); }, 1800);
+    }
+  } catch (e) { /* silent */ }
+}
+
+async function completeStep(i) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    OPEN_STEPS.delete(i);
+    await loadCase();
+  } catch (err) { alert('Could not complete step: ' + err.message); }
+}
+
+async function undoStep(i) {
+  if (!confirm('Undo this step?')) return;
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    OPEN_STEPS.add(i);
+    await loadCase();
+  } catch (err) { alert('Could not undo step: ' + err.message); }
+}
+
+async function updateStatus(val) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: val }),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    await loadCase();
+  } catch (err) { alert('Could not update status: ' + err.message); }
+}
+
+// ── evidence modal ───────────────────────────────────
+function openEvidenceModal() {
+  document.getElementById('ev-filename').value = '';
+  document.getElementById('ev-notes').value = '';
+  document.getElementById('ev-kind').value = 'Other';
+  document.getElementById('evidence-modal').style.display = 'flex';
+  refreshIcons(document.getElementById('evidence-modal'));
+}
+
+function closeEvidenceModal() {
+  document.getElementById('evidence-modal').style.display = 'none';
+}
+
+async function attachEvidence() {
+  const filename = document.getElementById('ev-filename').value.trim();
+  if (!filename) { alert('Filename is required.'); return; }
+  const kind  = document.getElementById('ev-kind').value;
+  const notes = document.getElementById('ev-notes').value.trim();
+
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/evidence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, kind, notes }),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    closeEvidenceModal();
+    await loadCase();
+  } catch (err) { alert('Could not attach evidence: ' + err.message); }
+}
+
+// ── escape ───────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── boot ─────────────────────────────────────────────
+loadCase();
+setInterval(() => {
+  // auto-refresh only when no modal is open
+  if (document.getElementById('evidence-modal').style.display === 'none') {
+    loadCase();
+  }
+}, 30000);
+</script>
+</body>
+</html>

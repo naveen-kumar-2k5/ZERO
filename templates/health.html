@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — API Health</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/health.css') }}">
+
+  <style>
+    /* ── Sidebar ── */
+    #sidebar{position:fixed;top:0;left:0;width:var(--sidebar-w);height:100vh;
+             background:var(--bg-sidebar);display:flex;flex-direction:column;z-index:200}
+    .sb-logo{padding:18px 22px 16px;border-bottom:1px solid rgba(255,255,255,.06)}
+    .sb-logo-text{font-family:var(--font-brand);font-size:19px;font-weight:800;color:#fff;letter-spacing:-.4px}
+    .sb-logo-text span{color:#f87171}
+    .sb-logo-sub{font-size:11px;color:var(--sidebar-text);margin-top:2px}
+    .sb-nav{flex:1;overflow-y:auto;padding:10px 0 12px}
+    .sb-section-label{font-size:9.5px;font-weight:700;letter-spacing:.9px;text-transform:uppercase;
+                      color:rgba(143,163,192,.4);padding:14px 22px 5px}
+    .nav-item{display:flex;align-items:center;gap:11px;padding:9px 22px;cursor:pointer;
+              color:var(--sidebar-text);font-size:13.5px;font-weight:500;
+              text-decoration:none;transition:background .12s,color .12s;position:relative}
+    .nav-item:hover{background:var(--bg-sidebar-hover);color:#f3a8a8}
+    .nav-item.active{background:var(--bg-sidebar-active);color:var(--sidebar-text-active)}
+    .nav-item.active::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+                             background:#f87171;border-radius:0 2px 2px 0}
+    .nav-icon{width:20px;height:20px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+    .nav-icon svg{width:17px;height:17px;stroke-width:1.8}
+    .sb-footer{padding:16px 22px;border-top:1px solid rgba(255,255,255,.06)}
+    .sb-org{font-size:12px;font-weight:600;color:#e8a8a8;margin-bottom:4px}
+    .sb-compliance{font-size:11.5px;color:#4ade80;display:flex;align-items:center;gap:5px}
+
+    /* ── Topbar ── */
+    #topbar{position:fixed;top:0;left:var(--sidebar-w);right:0;height:var(--topbar-h);
+            background:var(--bg-surface);border-bottom:1px solid var(--border);
+            display:flex;align-items:center;justify-content:space-between;padding:0 28px;z-index:100}
+    .topbar-brand{font-family:var(--font-brand);font-size:17px;font-weight:800;color:var(--text-1);letter-spacing:-.4px}
+    .topbar-brand span{color:#c81e2b}
+    #topbar .page-title{font-family:var(--font-brand);font-size:15px;font-weight:700;color:var(--text-1)}
+    .topbar-right{display:flex;align-items:center;gap:18px}
+    #live-time{font-family:var(--font-brand);font-size:12.5px;color:var(--text-3)}
+    .user-av{width:32px;height:32px;border-radius:50%;background:var(--accent);color:#fff;
+             font-family:var(--font-brand);font-size:11px;font-weight:700;
+             display:flex;align-items:center;justify-content:center}
+
+    /* ── Content ── */
+    #content{margin-left:var(--sidebar-w);padding-top:var(--topbar-h);min-height:100vh;padding:28px}
+
+    /* Hero */
+    .health-hero{display:flex;align-items:center;justify-content:space-between;gap:16px;
+                 padding:20px 24px;border-radius:var(--r-lg);margin-bottom:20px;
+                 background:var(--bg-surface);border:1px solid var(--border);box-shadow:var(--shadow-sm)}
+    .health-hero.ok       {border-left:4px solid var(--c-low)}
+    .health-hero.degraded {border-left:4px solid var(--c-high)}
+    .health-hero.down     {border-left:4px solid var(--c-critical)}
+    .health-hero-title{font-family:var(--font-brand);font-size:20px;font-weight:800;color:var(--text-1);margin-bottom:4px}
+    .health-hero-sub{font-size:13px;color:var(--text-2)}
+    .health-hero-icon{width:52px;height:52px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+    .health-hero-icon.ok       {background:var(--c-low-bg);color:var(--c-low)}
+    .health-hero-icon.degraded {background:var(--c-high-bg);color:var(--c-high)}
+    .health-hero-icon.down     {background:var(--c-critical-bg);color:var(--c-critical)}
+    .health-hero-icon svg{width:28px;height:28px}
+
+    /* Cards */
+    .health-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:20px}
+    .health-card{background:var(--bg-surface);border:1px solid var(--border);
+                 border-radius:var(--r-lg);padding:18px 20px;box-shadow:var(--shadow-sm);
+                 transition:border-color .14s}
+    .health-card.ok       {border-left:4px solid var(--c-low)}
+    .health-card.degraded {border-left:4px solid var(--c-high)}
+    .health-card.down     {border-left:4px solid var(--c-critical)}
+    .health-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px}
+    .health-card-name{font-size:15px;font-weight:700;color:var(--text-1);display:flex;align-items:center;gap:8px}
+    .health-card-name .ui-icon{width:18px;height:18px}
+    .health-card-status{font-size:11.5px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;
+                        padding:3px 9px;border-radius:5px;font-family:var(--font-brand)}
+    .health-card-status.ok       {background:var(--c-low-bg);color:var(--c-low)}
+    .health-card-status.degraded {background:var(--c-high-bg);color:var(--c-high)}
+    .health-card-status.down     {background:var(--c-critical-bg);color:var(--c-critical)}
+    .health-card-detail{font-size:13px;color:var(--text-2);line-height:1.5;word-break:break-word}
+
+    /* Structured meta rows — shows numeric rows/oldest/newest etc. */
+    .health-card-meta{margin-top:12px;padding-top:12px;border-top:1px dashed var(--border);
+                      display:grid;grid-template-columns:repeat(2, 1fr);gap:8px 14px;
+                      font-size:11.5px;color:var(--text-3)}
+    .health-card-meta .meta-item{display:flex;align-items:center;gap:6px;min-width:0}
+    .health-card-meta .meta-item strong{color:var(--text-1);font-weight:700;font-family:var(--font-code);
+                                        overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+    /* Toolbar */
+    .health-actions{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px}
+    #refresh-note{font-size:12.5px;color:var(--text-3);margin-left:4px}
+    .spinner{display:inline-block;width:13px;height:13px;border:2px solid var(--border-2);
+             border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;
+             vertical-align:-2px;margin-right:6px}
+    @keyframes spin{to{transform:rotate(360deg)}}
+
+    /* History strip */
+    .health-history{font-size:12.5px;color:var(--text-3);margin-top:6px}
+    .health-history span{margin-right:14px}
+    .health-history span.err{color:var(--c-critical);font-weight:600}
+    .health-history span.warn{color:var(--c-high);font-weight:600}
+    .health-history span.ok{color:var(--c-low);font-weight:600}
+
+    @media (max-width:900px){
+      .health-grid{grid-template-columns:1fr}
+      .health-card-meta{grid-template-columns:1fr}
+    }
+  </style>
+</head>
+<body>
+
+<!-- ══════ SIDEBAR ══════ -->
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item active" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<!-- ══════ TOPBAR ══════ -->
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">API Health</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<!-- ══════ CONTENT ══════ -->
+<main id="content">
+
+  <div class="page-hd">
+    <h1>API Health</h1>
+    <p>Live status of every service in the ZeroRespond pipeline: webhook, UI, database, and poller.</p>
+  </div>
+
+  <div class="health-hero" id="health-hero">
+    <div>
+      <div class="health-hero-title" id="hero-title">Checking services…</div>
+      <div class="health-hero-sub" id="hero-sub">Running health checks against all four components.</div>
+    </div>
+    <div class="health-hero-icon" id="hero-icon">
+      <span class="spinner"></span>
+    </div>
+  </div>
+
+  <div class="health-actions">
+    <button class="btn btn-primary btn-sm" onclick="loadHealth()">
+      <i data-lucide="refresh-cw" class="ui-icon"></i> Refresh now
+    </button>
+    <label style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text-2);cursor:pointer">
+      <input type="checkbox" id="auto-refresh" checked onchange="toggleAutoRefresh()">
+      Auto-refresh every 15s
+    </label>
+    <span id="refresh-note"></span>
+  </div>
+
+  <div class="health-grid" id="health-grid">
+    <!-- filled by JS -->
+  </div>
+
+  <div class="health-history" id="health-history"></div>
+
+  <div class="card" style="margin-top:20px">
+    <div class="card-hd">
+      <span class="card-title"><i data-lucide="info" class="ui-icon"></i> What each check means</span>
+    </div>
+    <div style="font-size:13px;color:var(--text-2);line-height:1.7">
+      <p style="margin-bottom:8px"><strong>Webhook API</strong> — the endpoint Wazuh posts detections to, on port <code style="font-family:var(--font-code);background:var(--bg-base);padding:1px 5px;border-radius:3px">:5000</code>. If this is down, no new detections arrive.</p>
+      <p style="margin-bottom:8px"><strong>UI / Flask app</strong> — this server, on port <code style="font-family:var(--font-code);background:var(--bg-base);padding:1px 5px;border-radius:3px">:5001</code>. If this is down, you're reading a cached page.</p>
+      <p style="margin-bottom:8px"><strong>PostgreSQL</strong> — the <code style="font-family:var(--font-code);background:var(--bg-base);padding:1px 5px;border-radius:3px">alerts</code> table on <code style="font-family:var(--font-code);background:var(--bg-base);padding:1px 5px;border-radius:3px">zerorespong_db</code>. Reports row count and newest row age. If this is down, nothing can be read or written.</p>
+      <p><strong>Wazuh poller</strong> — no HTTP endpoint; health means <em>"rows are still being written"</em>. If the newest row in <code style="font-family:var(--font-code);background:var(--bg-base);padding:1px 5px;border-radius:3px">alerts</code> is older than 5 minutes, the poller is stale (paused, crashed, or the webhook URL is wrong).</p>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Icons ─────────────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+// ── Clock ─────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Icons per service name ────────────────────────────
+const ICONS = {
+  'Webhook API':     'webhook',
+  'UI / Flask app':  'monitor',
+  'PostgreSQL':      'database',
+  'Wazuh poller':    'radar',
+};
+const STATUS_LABEL = { ok: 'Healthy', degraded: 'Degraded', down: 'Down' };
+
+let _autoTimer = null;
+const _history = [];        // last 5 checks — {t, status, downCount, degradedCount}
+
+// ── Load ──────────────────────────────────────────────
+async function loadHealth() {
+  const hero  = document.getElementById('health-hero');
+  const heroT = document.getElementById('hero-title');
+  const heroS = document.getElementById('hero-sub');
+  const heroI = document.getElementById('hero-icon');
+  const note  = document.getElementById('refresh-note');
+
+  note.innerHTML = '<span class="spinner"></span>Checking…';
+
+  try {
+    const r    = await fetch('/api/v1/health', { cache: 'no-store' });
+    const body = await r.json();
+    const overall = body.status || 'down';
+    const checkedAt = new Date(body.checked_at || Date.now());
+
+    // Hero
+    hero.className = 'health-hero ' + overall;
+    const titles = { ok: 'All systems operational',
+                     degraded: 'Some services degraded',
+                     down: 'One or more services down' };
+    const icons  = { ok: 'circle-check', degraded: 'triangle-alert', down: 'circle-x' };
+    heroT.textContent = titles[overall] || 'Unknown state';
+    heroS.textContent = `Last checked ${checkedAt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`;
+    heroI.className   = 'health-hero-icon ' + overall;
+    heroI.innerHTML   = `<i data-lucide="${icons[overall] || 'circle-help'}" class="ui-icon"></i>`;
+    refreshIcons(heroI);
+
+    // Cards
+    const grid = document.getElementById('health-grid');
+    const checks = body.checks || [];
+    grid.innerHTML = checks.map(c => {
+      const st = c.status || 'down';
+      const metaItems = [];
+
+      // Latency (HTTP checks)
+      if (c.latency_ms != null) {
+        metaItems.push(`
+          <div class="meta-item">
+            <i data-lucide="timer" class="ui-icon"></i>
+            latency <strong>${c.latency_ms} ms</strong>
+          </div>`);
+      }
+
+      // Rows (DB + poller checks)
+      if (c.rows != null) {
+        metaItems.push(`
+          <div class="meta-item">
+            <i data-lucide="rows-3" class="ui-icon"></i>
+            rows <strong>${c.rows}</strong>
+          </div>`);
+      }
+
+      // Last write age (poller)
+      if (c.stale_sec != null) {
+        const age = c.stale_sec < 60
+          ? `${c.stale_sec}s`
+          : c.stale_sec < 3600
+            ? `${Math.floor(c.stale_sec/60)}m ${c.stale_sec%60}s`
+            : `${Math.floor(c.stale_sec/3600)}h ${Math.floor((c.stale_sec%3600)/60)}m`;
+        metaItems.push(`
+          <div class="meta-item">
+            <i data-lucide="clock-3" class="ui-icon"></i>
+            last write <strong>${age} ago</strong>
+          </div>`);
+      }
+
+      // Last seen ISO timestamp (poller)
+      if (c.last_seen) {
+        const local = new Date(c.last_seen)
+          .toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        metaItems.push(`
+          <div class="meta-item">
+            <i data-lucide="calendar" class="ui-icon"></i>
+            seen <strong>${escapeHtml(local)}</strong>
+          </div>`);
+      }
+
+      // Oldest row (DB)
+      if (c.oldest) {
+        const local = new Date(c.oldest)
+          .toLocaleString('en-IN', { timeZone: 'Asia/Kolkata' });
+        metaItems.push(`
+          <div class="meta-item">
+            <i data-lucide="history" class="ui-icon"></i>
+            oldest <strong>${escapeHtml(local)}</strong>
+          </div>`);
+      }
+
+      return `
+        <div class="health-card ${st}">
+          <div class="health-card-top">
+            <div class="health-card-name">
+              <i data-lucide="${ICONS[c.name] || 'activity'}" class="ui-icon"></i>
+              ${escapeHtml(c.name)}
+            </div>
+            <span class="health-card-status ${st}">${STATUS_LABEL[st] || st}</span>
+          </div>
+          <div class="health-card-detail">${escapeHtml(c.detail || '')}</div>
+          ${metaItems.length ? `<div class="health-card-meta">${metaItems.join('')}</div>` : ''}
+        </div>`;
+    }).join('');
+    refreshIcons(grid);
+
+    // History strip
+    const downCount     = checks.filter(c => c.status === 'down').length;
+    const degradedCount = checks.filter(c => c.status === 'degraded').length;
+    _history.unshift({
+      t: checkedAt.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      status: overall,
+      downCount,
+      degradedCount,
+    });
+    if (_history.length > 5) _history.length = 5;
+    renderHistory();
+
+    note.textContent = `Updated ${new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' })} IST`;
+  } catch (err) {
+    hero.className = 'health-hero down';
+    heroT.textContent = 'Could not reach /api/v1/health';
+    heroS.textContent = err.message;
+    heroI.className = 'health-hero-icon down';
+    heroI.innerHTML = '<i data-lucide="circle-x" class="ui-icon"></i>';
+    refreshIcons(heroI);
+    note.textContent = 'Fetch failed — check that the Flask app is running.';
+    _history.unshift({
+      t: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata' }),
+      status: 'down', downCount: '—', degradedCount: '—'
+    });
+    if (_history.length > 5) _history.length = 5;
+    renderHistory();
+  }
+}
+
+function renderHistory() {
+  const el = document.getElementById('health-history');
+  if (!el) return;
+  el.innerHTML = _history.map(h => {
+    const cls = h.status === 'ok' ? 'ok' : h.status === 'degraded' ? 'warn' : 'err';
+    const extra = h.status === 'ok'
+      ? ''
+      : ` · ${h.downCount} down, ${h.degradedCount} degraded`;
+    return `<span class="${cls}">${h.t} — ${h.status.toUpperCase()}${extra}</span>`;
+  }).join('');
+}
+
+function toggleAutoRefresh() {
+  const on = document.getElementById('auto-refresh').checked;
+  if (_autoTimer) { clearInterval(_autoTimer); _autoTimer = null; }
+  if (on) _autoTimer = setInterval(loadHealth, 15000);
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Initial
+loadHealth();
+toggleAutoRefresh();
+</script>
+</body>
+</html>

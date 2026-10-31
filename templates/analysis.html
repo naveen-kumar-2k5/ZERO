@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Attack Analysis</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/analysis.css') }}">
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item active" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+        <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Attack Analysis</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<main id="content">
+
+  <div class="page-hd">
+    <h1>Attack Analysis</h1>
+    <p>Detailed breakdown of the four attack types ZeroRespond currently monitors: Brute Force, Privilege Escalation, File Integrity, and Ransomware.</p>
+  </div>
+
+  <div id="error-banner" class="error-banner" style="display:none"></div>
+
+  <!-- ── Attack type cards ── -->
+  <div class="attack-analysis-grid" id="attack-cards">
+    <div class="aa-card bf"><div class="aa-card-name">Loading…</div></div>
+    <div class="aa-card pe"><div class="aa-card-name">Loading…</div></div>
+    <div class="aa-card fim"><div class="aa-card-name">Loading…</div></div>
+    <div class="aa-card ra"><div class="aa-card-name">Loading…</div></div>
+  </div>
+
+  <!-- ── Charts ── -->
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px" id="charts-row">
+    <div class="card">
+      <div class="card-title" style="margin-bottom:4px">Detections Over Time</div>
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">
+        All 4 supported attack types — past
+        <select id="win-select" onchange="loadAnalysis()"
+                style="padding:1px 6px;font-family:var(--font-ui);font-size:12.5px;border:1px solid var(--border-2);border-radius:4px;background:#fff;cursor:pointer">
+          <option value="7">7</option>
+          <option value="14" selected>14</option>
+          <option value="30">30</option>
+        </select>
+        days
+      </div>
+      <div style="position:relative;height:220px">
+        <canvas id="chart-trend"></canvas>
+        <div id="empty-trend" class="chart-empty">Loading…</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title" style="margin-bottom:4px">Top Targeted Computers</div>
+      <div style="font-size:12.5px;color:var(--text-3);margin-bottom:14px">Most frequently attacked systems across all types</div>
+      <div style="position:relative;height:220px">
+        <canvas id="chart-targets"></canvas>
+        <div id="empty-targets" class="chart-empty">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Detail card with tabs ── -->
+  <div class="card" id="attack-detail-card">
+    <div class="card-hd">
+      <span class="card-title" id="attack-detail-title">
+        <i data-lucide="key-round" class="ui-icon"></i> Brute Force — Recent Detections
+      </span>
+      <div class="attack-type-tabs" style="margin-bottom:0">
+        <div class="at-tab bf active" data-tab="bf" onclick="setDetailType('bf', this)">
+          <i data-lucide="key-round" class="ui-icon"></i> Brute Force
+        </div>
+        <div class="at-tab pe" data-tab="pe" onclick="setDetailType('pe', this)">
+          <i data-lucide="arrow-up" class="ui-icon"></i> Priv. Escalation
+        </div>
+        <div class="at-tab fim" data-tab="fim" onclick="setDetailType('fim', this)">
+          <i data-lucide="folder" class="ui-icon"></i> File Integrity
+        </div>
+        <div class="at-tab ra" data-tab="ra" onclick="setDetailType('ra', this)">
+          <i data-lucide="lock" class="ui-icon"></i> Ransomware
+        </div>
+      </div>
+    </div>
+    <div id="attack-detail-list">
+      <div style="padding:32px;text-align:center;color:var(--text-3)">
+        <span class="spin"></span>Loading…
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Icons + clock ─────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Constants ─────────────────────────────────────────
+const CAT_ICON = {
+  bf:  'key-round',
+  pe:  'arrow-up',
+  fim: 'folder',
+  ra:  'lock',
+};
+const CAT_LABEL = {
+  bf:  'Brute Force',
+  pe:  'Privilege Escalation',
+  fim: 'File Integrity',
+  ra:  'Ransomware',
+};
+const CAT_COLOR = {
+  bf:  '#c81e2b',
+  pe:  '#d97706',
+  fim: '#16a34a',
+  ra:  '#7c3aed',
+};
+const SEV_PILL = {
+  critical: { bg: 'var(--c-critical-bg)', fg: 'var(--c-critical)' },
+  high:     { bg: 'var(--c-high-bg)',     fg: 'var(--c-high)'     },
+  medium:   { bg: 'var(--c-medium-bg)',   fg: 'var(--c-medium)'   },
+  low:      { bg: 'var(--c-low-bg)',      fg: 'var(--c-low)'      },
+};
+
+let CUR_TYPE = 'bf';
+let CHARTS = {};
+
+// ── Loader ────────────────────────────────────────────
+async function loadAnalysis() {
+  const errBanner = document.getElementById('error-banner');
+  errBanner.style.display = 'none';
+
+  const days = document.getElementById('win-select').value || '14';
+
+  setEmpty('empty-trend', true, 'Loading…');
+  setEmpty('empty-targets', true, 'Loading…');
+
+  try {
+    const r = await fetch(`/api/v1/analysis?days=${days}&type=${CUR_TYPE}`, { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+
+    renderCards(body.cards || []);
+    renderTrend(body.trend || []);
+    renderTargets(body.targets || []);
+    renderDetail(body.detail || [], body.detailType, body.detailCount);
+  } catch (err) {
+    errBanner.textContent = 'Could not load analysis: ' + err.message;
+    errBanner.style.display = 'block';
+    setEmpty('empty-trend', true, 'Unavailable');
+    setEmpty('empty-targets', true, 'Unavailable');
+    document.getElementById('attack-detail-list').innerHTML = `
+      <div style="padding:32px;text-align:center;color:var(--text-3)">
+        Unavailable
+      </div>`;
+  }
+}
+
+// ── Cards ─────────────────────────────────────────────
+function renderCards(cards) {
+  const el = document.getElementById('attack-cards');
+  const max = Math.max(1, ...cards.map(c => c.count));
+
+  el.innerHTML = cards.map(c => {
+    const icon = CAT_ICON[c.key] || 'triangle-alert';
+    const barPct = Math.round((c.count / max) * 100);
+    return `
+      <div class="aa-card ${c.key}" data-type="${c.key}" style="cursor:pointer"
+           onclick="setDetailType('${c.key}', document.querySelector('.at-tab.${c.key}'))">
+        <div class="aa-card-icon"><i data-lucide="${icon}" class="ui-icon"></i></div>
+        <div class="aa-card-name">${escapeHtml(c.label)}</div>
+        <div class="aa-card-count">${c.count}</div>
+        <div class="aa-card-sub">
+          detection${c.count === 1 ? '' : 's'} · ${c.pct}% of total
+        </div>
+        <div class="aa-card-bar">
+          <div class="aa-card-bar-fill" style="width:${barPct}%"></div>
+        </div>
+      </div>`;
+  }).join('');
+  refreshIcons(el);
+}
+
+// ── Trend chart ───────────────────────────────────────
+function renderTrend(trend) {
+  if (CHARTS.trend) { CHARTS.trend.destroy(); delete CHARTS.trend; }
+  const ctx = document.getElementById('chart-trend').getContext('2d');
+  const anyData = trend.some(p => p.bf + p.pe + p.fim + p.ra > 0);
+  if (!trend.length || !anyData) {
+    setEmpty('empty-trend', true, 'No alerts in this window');
+    return;
+  }
+  setEmpty('empty-trend', false);
+
+  CHARTS.trend = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trend.map(p => shortDate(p.date)),
+      datasets: [
+        ds('Brute Force',      trend.map(p => p.bf),  CAT_COLOR.bf),
+        ds('Privilege Esc.',   trend.map(p => p.pe),  CAT_COLOR.pe),
+        ds('File Integrity',   trend.map(p => p.fim), CAT_COLOR.fim),
+        ds('Ransomware',       trend.map(p => p.ra),  CAT_COLOR.ra),
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+        tooltip: { padding: 10 },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+function ds(label, data, color) {
+  return {
+    label, data,
+    borderColor: color,
+    backgroundColor: color + '20',
+    tension: .35, pointRadius: 3, pointHoverRadius: 5, borderWidth: 2, fill: false,
+  };
+}
+
+// ── Targets chart ─────────────────────────────────────
+function renderTargets(targets) {
+  if (CHARTS.targets) { CHARTS.targets.destroy(); delete CHARTS.targets; }
+  const ctx = document.getElementById('chart-targets').getContext('2d');
+  if (!targets.length) {
+    setEmpty('empty-targets', true, 'No agents with alerts');
+    return;
+  }
+  setEmpty('empty-targets', false);
+
+  // Build stacked-by-category bars per agent
+  const bf  = targets.map(t => t.breakdown.bf  || 0);
+  const pe  = targets.map(t => t.breakdown.pe  || 0);
+  const fim = targets.map(t => t.breakdown.fim || 0);
+  const ra  = targets.map(t => t.breakdown.ra  || 0);
+
+  CHARTS.targets = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: targets.map(t => t.agent),
+      datasets: [
+        { label: 'Brute Force',   data: bf,  backgroundColor: CAT_COLOR.bf,  borderRadius: 3, maxBarThickness: 20 },
+        { label: 'Priv. Esc.',    data: pe,  backgroundColor: CAT_COLOR.pe,  borderRadius: 3, maxBarThickness: 20 },
+        { label: 'File Integrity',data: fim, backgroundColor: CAT_COLOR.fim, borderRadius: 3, maxBarThickness: 20 },
+        { label: 'Ransomware',    data: ra,  backgroundColor: CAT_COLOR.ra,  borderRadius: 3, maxBarThickness: 20 },
+      ],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, padding: 10 } },
+      },
+      scales: {
+        x: { stacked: true, beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
+        y: { stacked: true, grid: { display: false }, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Detail list ───────────────────────────────────────
+function setDetailType(type, tabEl) {
+  CUR_TYPE = type;
+  document.querySelectorAll('#attack-detail-card .at-tab').forEach(t => t.classList.remove('active'));
+  if (tabEl) tabEl.classList.add('active');
+  else document.querySelector(`#attack-detail-card .at-tab[data-tab="${type}"]`)?.classList.add('active');
+
+  // update heading
+  const icon = CAT_ICON[type] || 'triangle-alert';
+  document.getElementById('attack-detail-title').innerHTML =
+    `<i data-lucide="${icon}" class="ui-icon"></i> ${CAT_LABEL[type]} — Recent Detections`;
+  refreshIcons(document.getElementById('attack-detail-title'));
+
+  loadAnalysis();
+}
+
+function renderDetail(rows, type, totalCount) {
+  const el = document.getElementById('attack-detail-list');
+  if (!rows.length) {
+    el.innerHTML = `<div class="empty-state">
+      <i data-lucide="${CAT_ICON[type] || 'circle-check'}" class="ui-icon"></i>
+      <div class="empty-state-title">No ${CAT_LABEL[type]} detections recorded</div>
+      <div class="empty-state-sub">This attack type has produced no alerts yet.</div>
+    </div>`;
+    refreshIcons(el);
+    return;
+  }
+
+  el.innerHTML = rows.map((r, i) => {
+    const sev = SEV_PILL[r.sev] || SEV_PILL.low;
+    return `
+      <div class="attack-detail-row">
+        <span class="adr-num">${i + 1}</span>
+        <div class="adr-body">
+          <div class="adr-name">${escapeHtml(r.name)}</div>
+          <div class="adr-desc">${escapeHtml(r.desc)}</div>
+          <div style="margin-top:4px;font-size:12px;color:var(--text-3)">
+            <i data-lucide="laptop" class="ui-icon"></i> ${escapeHtml(r.computer)}
+            &nbsp;·&nbsp;
+            <i data-lucide="clock-3" class="ui-icon"></i> ${escapeHtml(r.time)}
+            &nbsp;·&nbsp;
+            Rule ${escapeHtml(r.ruleId)}
+          </div>
+        </div>
+        <span class="adr-badge" style="background:${sev.bg};color:${sev.fg}">
+          ${r.sev.charAt(0).toUpperCase() + r.sev.slice(1)}
+        </span>
+      </div>`;
+  }).join('') + (
+    totalCount > rows.length
+      ? `<div style="padding:12px 20px;text-align:center;font-size:12.5px;color:var(--text-3);border-top:1px solid var(--border)">
+          Showing ${rows.length} of ${totalCount} — open the Detection Feed for the full list.
+        </div>`
+      : ''
+  );
+  refreshIcons(el);
+}
+
+// ── Helpers ───────────────────────────────────────────
+function setEmpty(id, show, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (show) { el.style.display = 'flex'; el.textContent = msg || 'No data'; }
+  else      { el.style.display = 'none'; }
+}
+
+function shortDate(iso) {
+  try {
+    const d = new Date(iso + 'T00:00:00Z');
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  } catch (e) { return iso; }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Boot ─────────────────────────────────────────────
+loadAnalysis();
+setInterval(() => {
+  if (document.visibilityState === 'visible') loadAnalysis();
+}, 60000);
+</script>
+</body>
+</html>

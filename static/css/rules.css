@@ -1,0 +1,139 @@
+/* ==========================================================================
+   ZeroRespond — Detection Rules + Rule Editor
+   Load after zerorespond.css on rules.html / rule-editor.html.
+   ========================================================================== */
+
+/* ── Filter bar ──────────────────────────────────── */
+.rules-filter-bar{display:flex;align-items:center;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+
+/* ── Attack type tabs ────────────────────────────── */
+.attack-type-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.at-tab{
+  padding:9px 16px;border-radius:6px;font-size:12.5px;font-weight:600;
+  cursor:pointer;border:1.5px solid var(--border-2);background:var(--bg-surface);
+  color:var(--text-2);transition:all .14s;user-select:none;
+  font-family:var(--font-brand);
+}
+.at-tab:hover{border-color:var(--accent);color:var(--accent)}
+.at-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+
+/* ── Rules table ─────────────────────────────────── */
+.rules-table-wrap{overflow-x:auto}
+.rule-row-type{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 8px 3px 6px;
+  border-radius:3px;font-size:11.5px;font-weight:700;font-family:var(--font-brand);
+  white-space:nowrap;border-left:3px solid;
+}
+.rule-row-type.bf {background:#f1f3f5;color:#374151;border-left-color:#9ca3af}
+.rule-row-type.pe {background:#f1f3f5;color:#374151;border-left-color:#9ca3af}
+.rule-row-type.fim{background:#f1f3f5;color:#374151;border-left-color:#9ca3af}
+.rule-row-type.ra {background:#f1f3f5;color:#374151;border-left-color:#9ca3af}
+
+.rule-condition{font-size:12.5px;color:var(--text-2);max-width:280px;line-height:1.4}
+
+/* ── Toggle switch ───────────────────────────────── */
+.rule-toggle{position:relative;display:inline-block;width:36px;height:20px;cursor:pointer}
+.rule-toggle input{opacity:0;width:0;height:0}
+.rule-toggle-slider{
+  position:absolute;top:0;left:0;right:0;bottom:0;
+  background:var(--border-2);border-radius:20px;transition:.2s;
+}
+.rule-toggle-slider:before{
+  position:absolute;content:"";height:14px;width:14px;left:3px;bottom:3px;
+  background:white;border-radius:50%;transition:.2s;
+}
+.rule-toggle input:checked + .rule-toggle-slider{background:var(--c-low)}
+.rule-toggle input:checked + .rule-toggle-slider:before{transform:translateX(16px)}
+
+/* ── Rule editor header ──────────────────────────── */
+.re-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:24px;flex-wrap:wrap;gap:12px;
+}
+.re-header-left{display:flex;align-items:center;gap:14px}
+.re-title{font-family:var(--font-brand);font-size:20px;font-weight:700;color:var(--text-1)}
+.re-subtitle{font-size:13px;color:var(--text-3);margin-top:2px}
+
+/* ── Validation message ──────────────────────────── */
+.validation-msg{
+  display:flex;align-items:center;gap:8px;padding:10px 14px;
+  border-radius:var(--r-sm);font-size:13px;margin-bottom:16px;
+}
+.validation-msg.ok {background:var(--c-low-bg);border:1px solid var(--c-low-border);color:#166534}
+.validation-msg.err{background:var(--c-critical-bg);border:1px solid var(--c-critical-border);color:#991b1b}
+
+/* ── XML editor ──────────────────────────────────── */
+.xml-editor-only{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);box-shadow:var(--shadow-sm);padding:20px;
+}
+.xml-editor-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-bottom:12px}
+.xml-editor-help{font-size:12px;color:var(--text-3)}
+.xml-parse-status{margin-top:9px;font-size:12.5px;color:var(--text-3);min-height:20px}
+
+.xml-editor-textarea{
+  width:100%;min-height:420px;padding:16px;
+  font-family:var(--font-code);font-size:13px;line-height:1.7;
+  background:var(--accent-light);color:#0f172a;
+  border:1.5px solid var(--accent-border);border-radius:var(--r-md);
+  resize:vertical;outline:none;transition:border .14s;
+  caret-color:var(--accent);
+}
+.xml-editor-textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(200,30,43,.15)}
+.xml-editor-textarea::placeholder{color:var(--text-3)}
+
+/* ── Two-column editor layout (form + live preview) ── */
+.rule-editor-layout{display:grid;grid-template-columns:1fr 1fr;gap:20px;align-items:start}
+.rule-editor-form{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:24px;box-shadow:var(--shadow-sm);
+}
+.rule-editor-preview{
+  background:var(--bg-surface);border:1px solid var(--border);
+  border-radius:var(--r-lg);padding:24px;box-shadow:var(--shadow-sm);
+  position:sticky;top:calc(var(--topbar-h) + 20px);
+}
+.rule-editor-section-title{
+  font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.6px;
+  color:var(--text-3);margin-bottom:14px;padding-bottom:9px;
+  border-bottom:1px solid var(--border);
+}
+
+/* ── Live XML preview ────────────────────────────── */
+.xml-preview-wrap{
+  background:var(--accent-light);border-radius:var(--r-md);padding:16px;
+  font-family:var(--font-code);font-size:12.5px;color:#0f172a;line-height:1.7;
+  position:relative;min-height:200px;overflow-x:auto;
+  border:1px solid var(--accent-border);
+}
+.xml-preview-wrap pre{white-space:pre;word-break:normal}
+.xml-tag    {color:var(--accent-hover)}
+.xml-attr   {color:var(--accent)}
+.xml-val    {color:#047857}
+.xml-comment{color:#64748b;font-style:italic}
+.copy-xml-btn{
+  position:absolute;top:10px;right:10px;background:rgba(200,30,43,.15);
+  color:var(--accent);border:none;border-radius:4px;padding:4px 10px;
+  font-size:11.5px;cursor:pointer;font-family:var(--font-ui);transition:all .13s;
+}
+.copy-xml-btn:hover{background:rgba(200,30,43,.28);color:var(--accent-hover)}
+
+/* ── Rule preview card ───────────────────────────── */
+.rule-preview-card{
+  padding:14px 16px;border-radius:var(--r-md);border:1px solid var(--border);
+  background:var(--bg-base);margin-bottom:16px;
+}
+.rule-preview-name{font-size:15px;font-weight:700;color:var(--text-1);margin-bottom:8px}
+.rule-preview-meta{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.rule-preview-condition{
+  font-size:13px;color:var(--text-2);line-height:1.55;
+  padding:10px 13px;background:var(--bg-surface);
+  border-radius:var(--r-sm);border:1px solid var(--border);
+}
+.rule-preview-empty{text-align:center;padding:30px 0;color:var(--text-3);font-size:13.5px}
+
+/* ── Responsive ──────────────────────────────────── */
+@media(max-width:900px){
+  .rule-editor-layout{grid-template-columns:1fr}
+  .rule-editor-preview{position:static}
+}

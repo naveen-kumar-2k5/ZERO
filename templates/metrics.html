@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Statistics</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/metrics.css') }}">
+</head>
+<body>
+
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item active" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Statistics</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<main id="content">
+
+  <div class="page-hd">
+    <h1>Statistics</h1>
+    <p>How quickly your organisation detects and stops attacks. Lower numbers and downward trends are better — they show ZeroRespond is working.</p>
+  </div>
+
+  <div id="error-banner" class="error-banner" style="display:none"></div>
+
+  <!-- ── Real counts from Postgres ── -->
+  <div class="workflow-summary">
+    <div class="workflow-card">
+      <div class="workflow-card-label">Total alerts</div>
+      <div class="workflow-card-value" id="w-total">—</div>
+      <div class="workflow-card-meta">all detections ever stored</div>
+    </div>
+    <div class="workflow-card">
+      <div class="workflow-card-label">Alerts · last 24h</div>
+      <div class="workflow-card-value" id="w-24h">—</div>
+      <div class="workflow-card-meta">recent volume</div>
+    </div>
+    <div class="workflow-card">
+      <div class="workflow-card-label">Open incidents</div>
+      <div class="workflow-card-value" id="w-open">—</div>
+      <div class="workflow-card-meta">active cases</div>
+    </div>
+    <div class="workflow-card">
+      <div class="workflow-card-label">Reports generated</div>
+      <div class="workflow-card-value" id="w-reports">—</div>
+      <div class="workflow-card-meta">CERT-In ready</div>
+    </div>
+  </div>
+
+  <!-- ── Metric cards (demo) ── -->
+  <div class="metrics-grid">
+    <div class="metric-card">
+      <div class="metric-val" id="m-mttd">— min</div>
+      <div class="metric-lbl">Average time to detect an attack</div>
+      <div class="metric-ctx">How quickly the system spots an attack. Target: under 10 minutes.</div>
+      <div class="metric-trend" id="m-mttd-trend">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" id="m-mttr">— min</div>
+      <div class="metric-lbl">Average time to stop an attack</div>
+      <div class="metric-ctx">From first warning to incident contained. Target: under 60 minutes.</div>
+      <div class="metric-trend" id="m-mttr-trend">—</div>
+    </div>
+    <div class="metric-card">
+      <div class="metric-val" id="m-fpr">—%</div>
+      <div class="metric-lbl">False alarm rate <span class="tip"><span class="tip-icon">i</span><span class="tip-pop">Warnings that turned out to be normal activity. Industry standard: under 20%.</span></span></div>
+      <div class="metric-ctx">Warnings that turned out to be normal activity. Lower is better.</div>
+      <div class="metric-trend" id="m-fpr-trend">—</div>
+    </div>
+  </div>
+
+  <!-- ── Charts ── -->
+  <div class="charts-wrap">
+    <div class="chart-card">
+      <div class="chart-title">Detection &amp; Response Time — Past 30 Days</div>
+      <div class="chart-sub">A downward trend means the system is getting faster at detecting and stopping attacks.</div>
+      <div style="position:relative;height:280px">
+        <canvas id="ch-trend"></canvas>
+        <div class="chart-empty" id="empty-trend" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-3)">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-2">
+    <div class="chart-card">
+      <div class="chart-title">Incidents Per Month</div>
+      <div class="chart-sub">Total security incidents handled each month</div>
+      <div style="position:relative;height:240px">
+        <canvas id="ch-monthly"></canvas>
+      </div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Breakdown by Attack Type</div>
+      <div class="chart-sub">Most common types of attacks (7-day window)</div>
+      <div style="position:relative;height:240px">
+        <canvas id="ch-types"></canvas>
+        <div class="chart-empty" id="empty-types" style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-3)">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="chart-card" style="margin-bottom:20px">
+    <div class="chart-title">False Alarm Rate — Past 30 Days</div>
+    <div class="chart-sub">Percentage of warnings that turned out to be normal activity. The sharp drop around day 8 shows when detection rules were tuned. Target: under 15%.</div>
+    <div style="position:relative;height:280px">
+      <canvas id="ch-fpr"></canvas>
+    </div>
+  </div>
+
+  <!-- ── Data provenance ── -->
+  <div class="card" style="margin-bottom:24px">
+    <div class="card-hd">
+      <span class="card-title"><i data-lucide="info" class="ui-icon"></i> Data provenance</span>
+    </div>
+    <div style="font-size:13px;color:var(--text-2);line-height:1.7" id="provenance">
+      Loading…
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Icons + clock ─────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Constants ─────────────────────────────────────────
+const CAT_COLOR = { bf: '#c81e2b', pe: '#d97706', fim: '#16a34a', ra: '#7c3aed' };
+const CAT_LABEL = { bf: 'Brute Force', pe: 'Privilege Escalation', fim: 'File Integrity', ra: 'Ransomware' };
+
+let CHARTS = {};
+
+function destroyChart(k) { if (CHARTS[k]) { CHARTS[k].destroy(); delete CHARTS[k]; } }
+
+// ── Loader ────────────────────────────────────────────
+async function loadMetrics() {
+  const errBanner = document.getElementById('error-banner');
+  errBanner.style.display = 'none';
+
+  try {
+    const r = await fetch('/api/v1/metrics', { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+
+    renderReal(body.real || {});
+    renderDemoMetrics(body.demo || {});
+    renderTrend(body.demo?.trend30 || []);
+    renderMonthly(body.demo?.monthly || []);
+    renderTypes(body.real?.perCategory7d || []);
+    renderFpr(body.demo?.fpr30 || []);
+    renderProvenance(body.real || {}, body.disclaimer);
+  } catch (err) {
+    errBanner.textContent = 'Could not load metrics: ' + err.message;
+    errBanner.style.display = 'block';
+  }
+}
+
+// ── Real numbers ──────────────────────────────────────
+function renderReal(real) {
+  document.getElementById('w-total').textContent   = (real.totalAlerts      || 0).toLocaleString();
+  document.getElementById('w-24h').textContent     = (real.alertsLast24h    || 0).toLocaleString();
+  document.getElementById('w-open').textContent    = (real.openCases        || 0).toLocaleString();
+  document.getElementById('w-reports').textContent = (real.reportsGenerated || 0).toLocaleString();
+}
+
+// ── Demo metric cards ─────────────────────────────────
+function renderDemoMetrics(demo) {
+  document.getElementById('m-mttd').textContent = `${demo.mttdMinutes?.toFixed(1) ?? '—'} min`;
+  document.getElementById('m-mttr').textContent = `${demo.mttrMinutes?.toFixed(1) ?? '—'} min`;
+  document.getElementById('m-fpr').textContent  = `${demo.falsePositivePct?.toFixed(0) ?? '—'}%`;
+  document.getElementById('m-mttd-trend').innerHTML =
+    '<i data-lucide="arrow-down" class="ui-icon"></i> Improving this month';
+  document.getElementById('m-mttr-trend').innerHTML =
+    '<i data-lucide="arrow-down" class="ui-icon"></i> Faster than manual handling';
+  document.getElementById('m-fpr-trend').innerHTML =
+    '<i data-lucide="arrow-down" class="ui-icon"></i> Down from default settings';
+  refreshIcons(document.querySelector('.metrics-grid'));
+}
+
+// ── 30-day trend ──────────────────────────────────────
+function renderTrend(trend) {
+  destroyChart('trend');
+  const el = document.getElementById('empty-trend');
+  if (!trend.length) { el.textContent = 'No data'; el.style.display = 'flex'; return; }
+  el.style.display = 'none';
+
+  const labels = trend.map(p => shortDate(p.date));
+  CHARTS.trend = new Chart(document.getElementById('ch-trend'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'Time to detect (min)',
+          data: trend.map(p => p.mttdMinutes),
+          borderColor: '#c81e2b',
+          backgroundColor: 'rgba(200,30,43,.08)',
+          tension: .35, pointRadius: 2, borderWidth: 2, fill: true,
+        },
+        {
+          label: 'Time to stop (min)',
+          data: trend.map(p => p.mttrMinutes),
+          borderColor: '#d97706',
+          backgroundColor: 'rgba(217,119,6,.08)',
+          tension: .35, pointRadius: 2, borderWidth: 2, fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, title: { display: true, text: 'Minutes', font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Monthly bar ───────────────────────────────────────
+function renderMonthly(monthly) {
+  destroyChart('monthly');
+  CHARTS.monthly = new Chart(document.getElementById('ch-monthly'), {
+    type: 'bar',
+    data: {
+      labels: monthly.map(m => m.month),
+      datasets: [{
+        label: 'Incidents',
+        data: monthly.map(m => m.total),
+        backgroundColor: 'rgba(200,30,43,.75)',
+        borderRadius: 6,
+        maxBarThickness: 34,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Type doughnut (real 7-day) ────────────────────────
+function renderTypes(perCategory) {
+  destroyChart('types');
+  const el = document.getElementById('empty-types');
+  const nonZero = perCategory.filter(p => p.count > 0);
+  if (!nonZero.length) { el.textContent = 'No alerts in last 7 days'; el.style.display = 'flex'; return; }
+  el.style.display = 'none';
+
+  CHARTS.types = new Chart(document.getElementById('ch-types'), {
+    type: 'doughnut',
+    data: {
+      labels: perCategory.map(p => CAT_LABEL[p.key] || p.key),
+      datasets: [{
+        data: perCategory.map(p => p.count),
+        backgroundColor: perCategory.map(p => CAT_COLOR[p.key] || '#94a3b8'),
+        borderColor: '#fff',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      cutout: '58%',
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 }, padding: 10 } },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+              const pct = total ? Math.round((ctx.parsed / total) * 100) : 0;
+              return `${ctx.label}: ${ctx.parsed} (${pct}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+// ── False-positive line ───────────────────────────────
+function renderFpr(fpr) {
+  destroyChart('fpr');
+  if (!fpr.length) return;
+
+  const labels = fpr.map(p => shortDate(p.date));
+  const data   = fpr.map(p => p.pct);
+  const target = Array(fpr.length).fill(15);
+
+  CHARTS.fpr = new Chart(document.getElementById('ch-fpr'), {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: 'False Alarm Rate (%)',
+          data,
+          borderColor: '#d97706',
+          backgroundColor: 'rgba(217,119,6,.08)',
+          tension: .35, pointRadius: 2, borderWidth: 2.5, fill: true,
+        },
+        {
+          label: 'Target — 15%',
+          data: target,
+          borderColor: '#16a34a',
+          borderDash: [5, 5],
+          borderWidth: 1.5,
+          pointRadius: 0,
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { min: 0, max: 35, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Data provenance card ──────────────────────────────
+function renderProvenance(real, disclaimer) {
+  const el = document.getElementById('provenance');
+  el.innerHTML = `
+    <p style="margin-bottom:8px">
+      <strong>Live from PostgreSQL:</strong>
+      ${real.totalAlerts || 0} alerts,
+      ${real.totalCases || 0} cases (${real.openCases || 0} open),
+      ${real.reportsGenerated || 0} reports generated.
+      The "Breakdown by Attack Type" chart shows real alerts from the last 7 days.
+    </p>
+    <p style="color:var(--text-3);font-size:12.5px">
+      ${escapeHtml(disclaimer || '')}
+    </p>`;
+}
+
+// ── Helpers ───────────────────────────────────────────
+function shortDate(iso) {
+  try {
+    const d = new Date(iso + 'T00:00:00Z');
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  } catch (e) { return iso; }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Boot ─────────────────────────────────────────────
+loadMetrics();
+setInterval(() => {
+  if (document.visibilityState === 'visible') loadMetrics();
+}, 60000);
+</script>
+</body>
+</html>

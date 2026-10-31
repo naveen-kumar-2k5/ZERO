@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/dashboard.css') }}">
+</head>
+<body>
+
+<!-- ══════ SIDEBAR ══════ -->
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item active" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+
+  </div>
+
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<!-- ══════ TOPBAR ══════ -->
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Dashboard</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<!-- ══════ CONTENT ══════ -->
+<main id="content">
+  <div class="page-wrap">
+
+    <div class="page-hd">
+      <h1>Dashboard</h1>
+      <p>Detection volume and severity across all monitored systems, drawn from the <code>alerts</code> table.</p>
+    </div>
+
+    <div id="error-banner" class="error-banner" style="display:none"></div>
+
+    <!-- ── Stat cards ── -->
+    <div class="kpi-row">
+      <div class="kpi-card total">
+        <div class="kpi-label"><i data-lucide="shield" class="ui-icon"></i> Total alerts</div>
+        <div class="kpi-value" id="kpi-total">—</div>
+        <div class="kpi-sub" id="kpi-total-sub">&nbsp;</div>
+      </div>
+      <div class="kpi-card critical">
+        <div class="kpi-label"><i data-lucide="triangle-alert" class="ui-icon"></i> Critical</div>
+        <div class="kpi-value" id="kpi-critical">—</div>
+        <div class="kpi-sub" id="kpi-critical-sub">&nbsp;</div>
+      </div>
+      <div class="kpi-card high">
+        <div class="kpi-label"><i data-lucide="circle-alert" class="ui-icon"></i> High</div>
+        <div class="kpi-value" id="kpi-high">—</div>
+        <div class="kpi-sub" id="kpi-high-sub">&nbsp;</div>
+      </div>
+      <div class="kpi-card last24">
+        <div class="kpi-label"><i data-lucide="clock-3" class="ui-icon"></i> Last 24h</div>
+        <div class="kpi-value" id="kpi-last24">—</div>
+        <div class="kpi-sub" id="kpi-last24-sub">&nbsp;</div>
+      </div>
+    </div>
+
+    <!-- ── Trend + severity ── -->
+    <div class="chart-row row-2-1">
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">Alerts over time</div>
+            <div class="chart-sub">Daily totals and critical-only counts</div>
+          </div>
+          <select class="chart-window-sel" id="window-sel" onchange="loadDashboard()">
+            <option value="7" selected>Last 7 days</option>
+            <option value="14">Last 14 days</option>
+            <option value="30">Last 30 days</option>
+          </select>
+        </div>
+        <div class="chart-body">
+          <canvas id="chart-trend"></canvas>
+          <div class="chart-empty" id="empty-trend">Loading…</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">By severity</div>
+            <div class="chart-sub">All alerts by level bucket</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <canvas id="chart-severity"></canvas>
+          <div class="chart-empty" id="empty-severity">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── Category + agents ── -->
+    <div class="chart-row row-2">
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">By attack type</div>
+            <div class="chart-sub">Derived from threat_type / mitre_id</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <canvas id="chart-category"></canvas>
+          <div class="chart-empty" id="empty-category">Loading…</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">Top agents</div>
+            <div class="chart-sub">Where alerts are being generated</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <canvas id="chart-agents"></canvas>
+          <div class="chart-empty" id="empty-agents">Loading…</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="chart-row row-2">
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">Top source IPs</div>
+            <div class="chart-sub">External addresses most seen in alerts</div>
+          </div>
+        </div>
+        <div class="chart-body">
+          <canvas id="chart-ips"></canvas>
+          <div class="chart-empty" id="empty-ips">Loading…</div>
+        </div>
+      </div>
+
+      <div class="chart-card">
+        <div class="chart-card-hd">
+          <div>
+            <div class="chart-title">Recent alerts</div>
+            <div class="chart-sub">Latest 8 detections</div>
+          </div>
+          <a class="btn btn-ghost btn-sm" href="/alerts">
+            Open feed <i data-lucide="arrow-right" class="ui-icon"></i>
+          </a>
+        </div>
+        <div class="recent-list" id="recent-list">
+          <div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">
+            <span class="spin"></span>Loading…
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── Icons + clock ─────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Palette + labels ──────────────────────────────────
+const SEV_COLORS = {
+  critical: '#dc2626',
+  high:     '#d97706',
+  medium:   '#b45309',
+  low:      '#16a34a',
+};
+const CAT_COLORS = {
+  bf:  '#c81e2b',
+  pe:  '#7c3aed',
+  fim: '#16a34a',
+  ra:  '#dc2626',
+};
+const CAT_LABEL = {
+  bf:  'Brute Force',
+  pe:  'Privilege Escalation',
+  fim: 'File Integrity',
+  ra:  'Ransomware',
+};
+
+// ── Chart instances (reused across refreshes) ─────────
+const charts = {};
+
+function destroyChart(key) {
+  if (charts[key]) { charts[key].destroy(); delete charts[key]; }
+}
+
+function setEmpty(id, show, msg) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (show) { el.style.display = 'flex'; el.textContent = msg || 'No data'; }
+  else      { el.style.display = 'none'; }
+}
+
+// ── Fetch + render ────────────────────────────────────
+async function loadDashboard() {
+  const days = document.getElementById('window-sel').value || '7';
+  const errBanner = document.getElementById('error-banner');
+  errBanner.style.display = 'none';
+
+  ['trend','severity','category','agents','ips'].forEach(k =>
+    setEmpty(`empty-${k}`, true, 'Loading…'));
+  document.getElementById('recent-list').innerHTML =
+    '<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">' +
+    '<span class="spin"></span>Loading…</div>';
+
+  try {
+    const res  = await fetch(`/api/v1/dashboard?days=${days}`, { cache: 'no-store' });
+    const body = await res.json();
+    if (!res.ok || body.status !== 'success') {
+      throw new Error(body.error || 'Failed to load dashboard');
+    }
+    renderStats(body.stats || {});
+    renderTrend(body.trend || []);
+    renderSeverity(body.severity || []);
+    renderCategory(body.categories || []);
+    renderAgents(body.top_agents || []);
+    renderIps(body.top_ips || []);
+    renderRecent(body.recent || []);
+  } catch (err) {
+    errBanner.textContent = 'Could not load dashboard: ' + err.message;
+    errBanner.style.display = 'block';
+    ['trend','severity','category','agents','ips'].forEach(k =>
+      setEmpty(`empty-${k}`, true, 'Unavailable'));
+    document.getElementById('recent-list').innerHTML =
+      '<div style="padding:20px;text-align:center;color:var(--text-3);font-size:13px">' +
+      'Unavailable</div>';
+  }
+}
+
+// ── Stat cards ────────────────────────────────────────
+function renderStats(s) {
+  const total = s.total || 0;
+  document.getElementById('kpi-total').textContent = total.toLocaleString();
+  document.getElementById('kpi-total-sub').textContent =
+    `across ${s.high + s.medium + s.low + s.critical > 0 ? 'all levels' : 'no data yet'}`;
+  document.getElementById('kpi-critical').textContent = (s.critical || 0).toLocaleString();
+  document.getElementById('kpi-critical-sub').textContent =
+    total ? `${Math.round((s.critical / total) * 100)}% of all alerts` : '—';
+  document.getElementById('kpi-high').textContent = (s.high || 0).toLocaleString();
+  document.getElementById('kpi-high-sub').textContent =
+    total ? `${Math.round((s.high / total) * 100)}% of all alerts` : '—';
+  document.getElementById('kpi-last24').textContent = (s.last24h || 0).toLocaleString();
+  document.getElementById('kpi-last24-sub').textContent =
+    s.last24h === 0 ? 'no new alerts — check /health' : 'new detections today';
+}
+
+// ── Trend line ────────────────────────────────────────
+function renderTrend(trend) {
+  destroyChart('trend');
+  const canvas = document.getElementById('chart-trend');
+  const ctx = canvas.getContext('2d');
+
+  if (!trend.length || trend.every(p => p.total === 0)) {
+    setEmpty('empty-trend', true, 'No alerts in this window');
+    return;
+  }
+  setEmpty('empty-trend', false);
+
+  charts.trend = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: trend.map(p => shortDate(p.date)),
+      datasets: [
+        {
+          label: 'All alerts',
+          data: trend.map(p => p.total),
+          borderColor: '#c81e2b',
+          backgroundColor: 'rgba(200,30,43,.10)',
+          tension: .35,
+          pointRadius: 3,
+          pointHoverRadius: 5,
+          borderWidth: 2,
+          fill: true,
+        },
+        {
+          label: 'Critical',
+          data: trend.map(p => p.critical),
+          borderColor: '#dc2626',
+          backgroundColor: 'rgba(220,38,38,.10)',
+          tension: .35,
+          pointRadius: 2,
+          pointHoverRadius: 4,
+          borderWidth: 2,
+          borderDash: [4, 3],
+          fill: false,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { position: 'bottom', labels: { boxWidth: 10, font: { size: 11 } } },
+        tooltip: { padding: 10 },
+      },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } },
+             grid: { color: 'rgba(0,0,0,.05)' } },
+      },
+    },
+  });
+}
+
+// ── Severity doughnut ─────────────────────────────────
+function renderSeverity(sev) {
+  destroyChart('severity');
+  const ctx = document.getElementById('chart-severity').getContext('2d');
+  const nonZero = sev.filter(s => s.count > 0);
+
+  if (!nonZero.length) {
+    setEmpty('empty-severity', true, 'No data');
+    return;
+  }
+  setEmpty('empty-severity', false);
+
+  charts.severity = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: sev.map(s => s.key.charAt(0).toUpperCase() + s.key.slice(1)),
+      datasets: [{
+        data: sev.map(s => s.count),
+        backgroundColor: sev.map(s => SEV_COLORS[s.key] || '#94a3b8'),
+        borderColor: '#fff',
+        borderWidth: 2,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      cutout: '58%',
+      plugins: {
+        legend: { position: 'bottom',
+                  labels: { boxWidth: 10, font: { size: 11 }, padding: 12 } },
+        tooltip: {
+          callbacks: {
+            label(ctx) {
+              const total = ctx.dataset.data.reduce((a,b)=>a+b,0);
+              const pct = total ? Math.round((ctx.parsed/total)*100) : 0;
+              return `${ctx.label}: ${ctx.parsed} (${pct}%)`;
+            },
+          },
+        },
+      },
+    },
+  });
+}
+
+// ── Category bar ──────────────────────────────────────
+function renderCategory(cats) {
+  destroyChart('category');
+  const ctx = document.getElementById('chart-category').getContext('2d');
+  if (!cats.length || cats.every(c => c.count === 0)) {
+    setEmpty('empty-category', true, 'No data');
+    return;
+  }
+  setEmpty('empty-category', false);
+
+  charts.category = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: cats.map(c => CAT_LABEL[c.key] || c.key),
+      datasets: [{
+        label: 'Alerts',
+        data: cats.map(c => c.count),
+        backgroundColor: cats.map(c => CAT_COLORS[c.key] || '#c81e2b'),
+        borderRadius: 6,
+        maxBarThickness: 48,
+      }],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 11 } } },
+        y: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } },
+             grid: { color: 'rgba(0,0,0,.05)' } },
+      },
+    },
+  });
+}
+
+// ── Top agents horizontal bar ─────────────────────────
+function renderAgents(agents) {
+  destroyChart('agents');
+  const ctx = document.getElementById('chart-agents').getContext('2d');
+  if (!agents.length) {
+    setEmpty('empty-agents', true, 'No agents yet');
+    return;
+  }
+  setEmpty('empty-agents', false);
+
+  charts.agents = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: agents.map(a => a.agent),
+      datasets: [{
+        label: 'Alerts',
+        data: agents.map(a => a.count),
+        backgroundColor: '#c81e2b',
+        borderRadius: 5,
+        maxBarThickness: 22,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } },
+             grid: { color: 'rgba(0,0,0,.05)' } },
+        y: { grid: { display: false }, ticks: { font: { size: 11 } } },
+      },
+    },
+  });
+}
+
+// ── Top source IPs horizontal bar ─────────────────────
+function renderIps(ips) {
+  destroyChart('ips');
+  const ctx = document.getElementById('chart-ips').getContext('2d');
+  if (!ips.length) {
+    setEmpty('empty-ips', true, 'No source IPs recorded');
+    return;
+  }
+  setEmpty('empty-ips', false);
+
+  charts.ips = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: ips.map(i => i.ip),
+      datasets: [{
+        label: 'Alerts',
+        data: ips.map(i => i.count),
+        backgroundColor: '#7c3aed',
+        borderRadius: 5,
+        maxBarThickness: 22,
+      }],
+    },
+    options: {
+      indexAxis: 'y',
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { beginAtZero: true, ticks: { precision: 0, font: { size: 11 } },
+             grid: { color: 'rgba(0,0,0,.05)' } },
+        y: { grid: { display: false },
+             ticks: { font: { size: 11, family: 'Fira Code' } } },
+      },
+    },
+  });
+}
+
+// ── Recent alerts ─────────────────────────────────────
+function renderRecent(rows) {
+  const el = document.getElementById('recent-list');
+  if (!rows.length) {
+    el.innerHTML = '<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">' +
+                   'No alerts recorded yet.</div>';
+    return;
+  }
+  el.innerHTML = rows.map(r => `
+    <div class="recent-row">
+      <span class="recent-sev ${r.sev}">${r.sev}</span>
+      <div class="recent-main">
+        <div class="recent-title">${escapeHtml(r.name)}</div>
+        <div class="recent-meta">Rule ${escapeHtml(r.ruleId)} · ${escapeHtml(r.computer)}</div>
+      </div>
+      <div class="recent-host">${escapeHtml(r.source_ip || '—')}</div>
+      <div class="recent-time">${escapeHtml(r.time)}</div>
+    </div>
+  `).join('');
+  refreshIcons(el);
+}
+
+// ── Helpers ───────────────────────────────────────────
+function shortDate(iso) {
+  try {
+    const d = new Date(iso + 'T00:00:00Z');
+    return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short' });
+  } catch (e) { return iso; }
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Initial load + auto-refresh ───────────────────────
+loadDashboard();
+setInterval(loadDashboard, 60000);
+</script>
+</body>
+</html>

@@ -1,0 +1,284 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Sign In</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+
+  <style>
+    /* ── Burgundy Background ── */
+    body {
+      margin: 0;
+      padding: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-color: #3d0a11; /* Deep burgundy */
+      background-image: radial-gradient(circle at 50% 0%, #5c121e 0%, #26050a 100%);
+      font-family: var(--font-ui);
+      overflow: hidden;
+    }
+
+    /* ── The Giant Half Null Symbol (Right Side Watermark) ── */
+    .null-bg {
+      position: absolute;
+      right: -15vw;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 60vw;
+      height: 120vh;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .null-bg svg {
+      width: 100%;
+      height: 100%;
+      fill: none;
+      stroke: rgba(255, 255, 255, 0.04); /* Very faint */
+      stroke-width: 4px;
+    }
+
+    /* ── Main Login Card (GLASS EFFECT) ── */
+    .login-card {
+      position: relative;
+      z-index: 1;
+      /* Semi-transparent white background */
+      background: rgba(255, 255, 255, 0.75); 
+      /* The magic frosted glass blur */
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      
+      width: 100%;
+      max-width: 420px;
+      padding: 50px 44px;
+      border-radius: var(--r-lg);
+      /* Subtle white border for the glass edge */
+      border: 1px solid rgba(255, 255, 255, 0.5); 
+      /* Soft shadow */
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.3), 
+                  inset 0 1px 0 rgba(255, 255, 255, 0.6);
+      margin: 20px;
+      text-align: center;
+    }
+
+    /* ── Centered Title ── */
+    .logo {
+      font-family: var(--font-brand);
+      font-size: 28px;
+      font-weight: 800;
+      color: #1a0508; /* Darker text for contrast against glass */
+      letter-spacing: -0.5px;
+      margin-bottom: 8px;
+    }
+    .logo span {
+      color: var(--accent);
+    }
+
+    .subtitle {
+      font-size: 13.5px;
+      color: #4a3a3d; /* Adjusted text color */
+      margin-bottom: 32px;
+    }
+
+    /* ── Form Elements ── */
+    .form-group {
+      margin-bottom: 20px;
+      text-align: left;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 11.5px;
+      font-weight: 700;
+      color: #4a3a3d;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 8px;
+    }
+
+    .input-wrap {
+      position: relative;
+    }
+
+    .input-wrap .ui-icon {
+      position: absolute;
+      left: 14px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #7a6a6d;
+      width: 18px;
+      height: 18px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 14px 12px 42px;
+      /* Slightly transparent input fields to blend with glass */
+      border: 1.5px solid rgba(200, 30, 43, 0.2);
+      background: rgba(255, 255, 255, 0.6);
+      border-radius: var(--r-sm);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      color: var(--text-1);
+      outline: none;
+      transition: all 0.14s;
+      box-sizing: border-box;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+      background: rgba(255, 255, 255, 0.9);
+      box-shadow: 0 0 0 3px rgba(200, 30, 43, 0.15);
+    }
+
+    /* ── Button ── */
+    .login-btn {
+      width: 100%;
+      padding: 12px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: var(--r-sm);
+      font-family: var(--font-ui);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.14s, transform 0.1s;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 8px;
+      margin-top: 24px;
+    }
+
+    .login-btn:hover { background: var(--accent-hover); }
+    .login-btn:active { transform: scale(0.98); }
+    .login-btn:disabled { opacity: 0.7; cursor: not-allowed; }
+
+    /* ── Error Message ── */
+    .error-msg {
+      display: none;
+      background: rgba(254, 226, 226, 0.8);
+      color: var(--c-critical);
+      border: 1px solid var(--c-critical-border);
+      padding: 10px 14px;
+      border-radius: var(--r-sm);
+      font-size: 13px;
+      margin-bottom: 20px;
+      align-items: center;
+      gap: 8px;
+      text-align: left;
+    }
+    
+    .footer {
+      margin-top: 32px;
+      font-size: 11.5px;
+      color: #6a5559;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Giant faint half null-symbol on the right -->
+  <div class="null-bg">
+    <svg viewBox="0 0 100 100">
+      <circle cx="50" cy="50" r="46"></circle>
+      <line x1="15" y1="85" x2="85" y2="15"></line>
+    </svg>
+  </div>
+
+  <!-- Main Content -->
+  <div class="login-card">
+    
+    <!-- Centered Title -->
+    <div class="logo">Zero<span>Respond</span></div>
+    <div class="subtitle">Sign in to your security dashboard</div>
+
+    <div class="error-msg" id="login-error">
+      <i data-lucide="circle-alert" class="ui-icon"></i>
+      <span id="login-error-text"></span>
+    </div>
+
+    <form id="login-form" onsubmit="handleLogin(event)">
+      <div class="form-group">
+        <label class="form-label" for="username">Username</label>
+        <div class="input-wrap">
+          <i data-lucide="user" class="ui-icon"></i>
+          <input type="text" id="username" class="form-input" placeholder="e.g. admin" required autocomplete="username" autofocus>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="password">Password</label>
+        <div class="input-wrap">
+          <i data-lucide="lock" class="ui-icon"></i>
+          <input type="password" id="password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+      </div>
+
+      <button type="submit" class="login-btn" id="login-btn">
+        <span>Sign In</span>
+        <i data-lucide="arrow-right" class="ui-icon" style="margin:0"></i>
+      </button>
+    </form>
+
+    <div class="footer">
+      &copy; 2026 Kumaraguru College of Technology
+    </div>
+  </div>
+
+  <script>
+    // Initialize Lucide icons
+    lucide.createIcons({ attrs: { 'stroke-width': 1.9 } });
+
+    async function handleLogin(e) {
+      e.preventDefault();
+      
+      const btn = document.getElementById('login-btn');
+      const errBox = document.getElementById('login-error');
+      const errText = document.getElementById('login-error-text');
+      
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+
+      // Reset state
+      errBox.style.display = 'none';
+      btn.disabled = true;
+      btn.innerHTML = '<span class="spin" style="border-top-color:#fff;width:16px;height:16px;margin-right:8px;"></span> Signing in...';
+
+      try {
+        const res = await fetch('/api/v1/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || data.status !== 'success') {
+          throw new Error(data.error || 'Invalid credentials');
+        }
+
+        // Success - redirect to dashboard
+        window.location.href = '/';
+        
+      } catch (err) {
+        errText.textContent = err.message;
+        errBox.style.display = 'flex';
+        
+        // Reset button
+        btn.disabled = false;
+        btn.innerHTML = '<span>Sign In</span><i data-lucide="arrow-right" class="ui-icon" style="margin:0"></i>';
+        lucide.createIcons({ attrs: { 'stroke-width': 1.9 } });
+      }
+    }
+  </script>
+</body>
+</html>

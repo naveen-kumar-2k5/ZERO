@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>ZeroRespond — Incident Cases</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=DM+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/incidents.css') }}">
+</head>
+<body>
+
+<!-- ══════ SIDEBAR ══════ -->
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
+    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
+    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item active" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
+    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
+    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
+    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
+        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>
+
+<!-- ══════ TOPBAR ══════ -->
+<header id="topbar">
+  <div style="display:flex;align-items:center;gap:14px">
+    <div class="topbar-brand">Zero<span>Respond</span></div>
+    <span class="page-title">Incident Cases</span>
+  </div>
+  <div class="topbar-right">
+    <span id="live-time">--:--:-- IST</span>
+    <div class="user-av">IT</div>
+  </div>
+</header>
+
+<!-- ══════ CONTENT ══════ -->
+<main id="content">
+
+  <div class="page-hd">
+    <h1>Incident Cases</h1>
+    <p>Manage incidents from detection through investigation, containment, and resolution.</p>
+  </div>
+
+  <div class="card" style="padding:20px 20px 0">
+    <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:0">
+      <div class="inc-tabs" style="margin-bottom:0;border-bottom:none">
+        <div class="inc-tab active" data-tab="all"      onclick="setTab('all', this)">All</div>
+        <div class="inc-tab"        data-tab="active"   onclick="setTab('active', this)">Active</div>
+        <div class="inc-tab"        data-tab="resolved" onclick="setTab('resolved', this)">Resolved</div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <input class="finput" type="text" id="inc-search" placeholder="Search cases…" oninput="debouncedLoad()" style="width:180px">
+        <select class="fselect" id="inc-filter-assignee" onchange="loadCases()">
+          <option value="">All assignees</option>
+          <option value="Naveen Kumar">Naveen Kumar</option>
+          <option value="Ragul">Ragul</option>
+          <option value="Manikandan">Manikandan</option>
+          <option value="Prithiv Raj">Prithiv Raj</option>
+          <option value="IT Team">IT Team</option>
+        </select>
+        <select class="fselect" id="inc-filter-type" onchange="loadCases()">
+          <option value="">All types</option>
+          <option value="Brute Force">Brute Force</option>
+          <option value="Privilege Escalation">Privilege Escalation</option>
+          <option value="File Integrity">File Integrity</option>
+          <option value="Ransomware">Ransomware</option>
+        </select>
+        <button class="btn btn-primary btn-sm" onclick="openNewIncidentModal()">
+          <i data-lucide="plus" class="ui-icon"></i> Report New Incident
+        </button>
+      </div>
+    </div>
+    <div class="divider" style="margin:14px -20px"></div>
+
+    <div style="overflow-x:auto">
+      <table>
+        <thead>
+          <tr>
+            <th>Case</th>
+            <th>Severity</th>
+            <th>Incident</th>
+            <th>Assigned To</th>
+            <th>Opened</th>
+            <th>Progress</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="inc-tbody">
+          <tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-3)">
+            <span class="spin"></span>Loading cases…
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ══════ REPORT NEW INCIDENT MODAL ══════ -->
+  <div id="new-incident-modal" class="modal-overlay" style="display:none"
+       onclick="if (event.target === this) closeNewIncidentModal()">
+    <div class="modal" onclick="event.stopPropagation()">
+      <div class="modal-hd">
+        <span class="modal-title"><i data-lucide="clipboard-list" class="ui-icon"></i> Report a New Incident</span>
+        <button class="modal-close" onclick="closeNewIncidentModal()">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="info-banner" style="margin-bottom:14px">
+          <i data-lucide="info" class="ui-icon"></i>
+          Use this form when you notice something suspicious yourself — before ZeroRespond has automatically detected it.
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Attack type *</label>
+          <select class="form-select" id="ni-type">
+            <option value="Ransomware">Ransomware — active encryption</option>
+            <option value="Brute Force">Brute Force — repeated auth attempts</option>
+            <option value="Privilege Escalation">Privilege Escalation — unexpected admin activity</option>
+            <option value="File Integrity">File Integrity — unexpected protected-file change</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Affected computer *</label>
+          <input class="form-input" id="ni-agent" placeholder="e.g. KCTLAB-WIN03, 10.0.0.25">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">What did you observe? *</label>
+          <textarea class="form-textarea" id="ni-desc" placeholder="e.g. Files on my computer show .encrypted extensions and won't open."></textarea>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Urgency</label>
+          <div class="sev-radio-group">
+            <div class="sev-radio"><input type="radio" name="ni-sev" id="ni-sev-c" value="critical"><label class="sev-radio-label critical" for="ni-sev-c">Critical</label></div>
+            <div class="sev-radio"><input type="radio" name="ni-sev" id="ni-sev-h" value="high"><label class="sev-radio-label high" for="ni-sev-h">High</label></div>
+            <div class="sev-radio"><input type="radio" name="ni-sev" id="ni-sev-m" value="medium" checked><label class="sev-radio-label medium" for="ni-sev-m">Medium</label></div>
+            <div class="sev-radio"><input type="radio" name="ni-sev" id="ni-sev-l" value="low"><label class="sev-radio-label low" for="ni-sev-l">Low</label></div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">Assign to</label>
+          <select class="form-select" id="ni-assign">
+            <option>Naveen Kumar</option>
+            <option>Ragul</option>
+            <option>Manikandan</option>
+            <option>Prithiv Raj</option>
+            <option selected>IT Team</option>
+          </select>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-secondary" onclick="closeNewIncidentModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="createIncident()">
+          <i data-lucide="clipboard-list" class="ui-icon"></i> Open Case
+        </button>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+// ── Icons ─────────────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+// ── Clock ─────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── State ─────────────────────────────────────────────
+let CUR_TAB = 'all';
+let DEBOUNCE = null;
+
+const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
+const STATUS_LABEL = {
+  'open': 'Open', 'investigating': 'Investigating', 'containing': 'Containing',
+  'contained': 'Contained', 'resolved': 'Resolved', 'false-positive': 'False Positive',
+};
+const STATUS_CHIP = {
+  'open': 'status-open', 'investigating': 'status-investigating',
+  'containing': 'status-containing', 'contained': 'status-contained',
+  'resolved': 'status-resolved', 'false-positive': 'status-false-positive',
+};
+const THREAT_ICON = {
+  'Ransomware':          'lock',
+  'Brute Force':         'key-round',
+  'Privilege Escalation':'arrow-up',
+  'File Integrity':      'folder',
+};
+
+// ── Loader ────────────────────────────────────────────
+function debouncedLoad() {
+  clearTimeout(DEBOUNCE);
+  DEBOUNCE = setTimeout(loadCases, 300);
+}
+
+async function loadCases() {
+  const tbody  = document.getElementById('inc-tbody');
+  const q      = document.getElementById('inc-search').value.trim();
+  const assign = document.getElementById('inc-filter-assignee').value;
+  const type   = document.getElementById('inc-filter-type').value;
+
+  const p = new URLSearchParams();
+  p.set('tab', CUR_TAB);
+  if (q)      p.set('q', q);
+  if (assign) p.set('assignee', assign);
+  if (type)   p.set('type', type);
+
+  tbody.innerHTML = `<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-3)">
+    <span class="spin"></span>Loading cases…</td></tr>`;
+
+  try {
+    const r = await fetch('/api/v1/incidents?' + p.toString(), { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    renderTable(body.data || []);
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--c-critical)">
+      <strong>Could not load cases</strong><br>
+      <span style="font-size:13px;color:var(--text-3)">${escapeHtml(err.message)}</span>
+    </td></tr>`;
+  }
+}
+
+function renderTable(rows) {
+  const tbody = document.getElementById('inc-tbody');
+  if (!rows.length) {
+    tbody.innerHTML = `<tr><td colspan="7" style="padding:40px;text-align:center;color:var(--text-3)">
+      No cases match your filter.</td></tr>`;
+    return;
+  }
+
+  tbody.innerHTML = rows.map(c => {
+    const pct = c.totalSteps ? Math.round((c.curStep / c.totalSteps) * 100) : 0;
+    const icon = THREAT_ICON[c.threatType] || 'triangle-alert';
+    const statusCls = STATUS_CHIP[c.status] || 'status-open';
+    return `
+      <tr onclick="openCase(${c.id})">
+        <td><strong style="font-family:var(--font-brand)">${escapeHtml(c.caseRef)}</strong></td>
+        <td><span class="badge ${c.severity}"><span class="bdot"></span>${SEV_LABEL[c.severity] || c.severity}</span></td>
+        <td>
+          <span style="display:inline-flex;align-items:center;gap:6px;font-weight:600">
+            <i data-lucide="${icon}" class="ui-icon"></i> ${escapeHtml(c.threatType)}
+          </span>
+          <div style="font-size:11.5px;color:var(--text-3);margin-top:2px">${escapeHtml(c.title)}</div>
+        </td>
+        <td style="font-size:13px">${escapeHtml(c.assignedTo || 'Unassigned')}</td>
+        <td style="font-size:12px;color:var(--text-3);font-family:var(--font-brand)">${escapeHtml(c.openedAtIst || '—')}</td>
+        <td style="min-width:130px">
+          <div class="progress-text">${c.curStep}/${c.totalSteps} steps done</div>
+          <div class="progress-bar"><div class="progress-fill" style="width:${pct}%"></div></div>
+        </td>
+        <td><span class="status-chip ${statusCls}">${STATUS_LABEL[c.status] || c.status}</span></td>
+      </tr>`;
+  }).join('');
+  refreshIcons(tbody);
+}
+
+function setTab(tab, el) {
+  CUR_TAB = tab;
+  document.querySelectorAll('.inc-tab').forEach(t => t.classList.remove('active'));
+  if (el) el.classList.add('active');
+  loadCases();
+}
+
+function openCase(id) {
+  window.location = '/incidents/' + id;
+}
+
+// ── New Incident Modal ────────────────────────────────
+function openNewIncidentModal() {
+  document.getElementById('ni-type').value = 'Ransomware';
+  document.getElementById('ni-agent').value = '';
+  document.getElementById('ni-desc').value = '';
+  document.getElementById('ni-sev-m').checked = true;
+  document.getElementById('ni-assign').value = 'IT Team';
+  document.getElementById('new-incident-modal').style.display = 'flex';
+  refreshIcons(document.getElementById('new-incident-modal'));
+}
+
+function closeNewIncidentModal() {
+  document.getElementById('new-incident-modal').style.display = 'none';
+}
+
+async function createIncident() {
+  const type   = document.getElementById('ni-type').value;
+  const agent  = document.getElementById('ni-agent').value.trim();
+  const desc   = document.getElementById('ni-desc').value.trim();
+  const sev    = document.querySelector('input[name="ni-sev"]:checked')?.value || 'medium';
+  const assign = document.getElementById('ni-assign').value;
+
+  if (!agent) { alert('Please enter the affected computer.'); return; }
+  if (!desc)  { alert('Please describe what you observed.'); return; }
+
+  const body = {
+    threatType:  type,
+    agent:       agent,
+    title:       desc.split('.')[0].slice(0, 120),
+    description: desc,
+    severity:    sev,
+    assignedTo:  assign,
+    dataCategories: 'To be determined',
+    personsAffected: 0,
+  };
+
+  try {
+    const r = await fetch('/api/v1/incidents', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const resp = await r.json();
+    if (!r.ok || resp.status !== 'success') {
+      throw new Error(resp.error || 'Failed to create case');
+    }
+    closeNewIncidentModal();
+    loadCases();
+    // Jump into the new case
+    if (resp.data && resp.data.id) {
+      setTimeout(() => openCase(resp.data.id), 300);
+    }
+  } catch (err) {
+    alert('Could not create case: ' + err.message);
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Initial load + auto-refresh ───────────────────────
+loadCases();
+setInterval(() => {
+  const focused = document.activeElement === document.getElementById('inc-search');
+  if (!focused) loadCases();
+}, 30000);
+</script>
+</body>
+</html>
