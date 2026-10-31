@@ -1,0 +1,82 @@
+version: '3.8'
+
+services:
+  # ── 1. PostgreSQL ────────────────────────────────────
+  db:
+    image: postgres:16-alpine
+    container_name: zerorespond-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       zerorespong_db
+      POSTGRES_USER:     zero
+      POSTGRES_PASSWORD: Zero@post1122
+      TZ:                Asia/Kolkata
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zero -d zerorespong_db"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── 2. Webhook receiver (port 5000) ──────────────────
+  webhook:
+    build: .
+    container_name: zerorespond-webhook
+    command: python webhook.py
+    ports:
+      - "5000:5000"
+    environment:
+      - TZ=Asia/Kolkata
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ── 3. Main UI (port 5001) ───────────────────────────
+  app:
+    build: .
+    container_name: zerorespond-app
+    command: python app.py
+    ports:
+      - "5001:5001"
+    environment:
+      - TZ=Asia/Kolkata
+      - PG_HOST=db
+      - PG_DB=zerorespong_db
+      - PG_USER=zero
+      - PG_PASSWORD=Zero@post1122
+      - WEBHOOK_URL=http://webhook:5000
+      - UI_URL=http://app:5001
+      - WAZUH_HOST=https://192.168.244.131:55000
+    depends_on:
+      db:
+        condition: service_healthy
+      webhook:
+        condition: service_started
+    restart: unless-stopped
+
+  # ── 4. Poller (webhook → postgres) ───────────────────
+  poller:
+    build: .
+    container_name: zerorespond-poller
+    command: python main.py
+    environment:
+      - TZ=Asia/Kolkata
+      - PG_HOST=db
+      - PG_DB=zerorespong_db
+      - PG_USER=zero
+      - PG_PASSWORD=Zero@post1122
+      - API_URL=http://webhook:5000/api/v1/alerts
+    depends_on:
+      db:
+        condition: service_healthy
+      webhook:
+        condition: service_started
+    restart: unless-stopped
+
+volumes:
+  postgres_data:

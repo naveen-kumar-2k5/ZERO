@@ -269,7 +269,7 @@ def api_me_reset_password():
                 (_hash_password(new), session["user_id"]),
             )
             _audit(cur, "Password reset", session["username"],
-                   "User reset their own password", actor=session["display_name"])
+                "User reset their own password", actor=session["display_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -340,10 +340,10 @@ def classify_category(row):
     Map a Wazuh alert row to one of bf / pe / fim / ra.
 
     Priority order:
-      1. Explicit threat_type string (if Wazuh already labelled it)
-      2. Known rule_id from your local ruleset
-      3. MITRE technique family
-      4. Fallback -> "bf" (most college-instance alerts are auth)
+    1. Explicit threat_type string (if Wazuh already labelled it)
+    2. Known rule_id from your local ruleset
+    3. MITRE technique family
+    4. Fallback -> "bf" (most college-instance alerts are auth)
 
     Keep RULE_MAP in sync as you discover new rule IDs in the feed.
     """
@@ -390,12 +390,12 @@ def classify_category(row):
     if mitre.startswith(("T1110", "T1078")):
         return "bf"
     if mitre.startswith(("T1068", "T1548", "T1055",
-                         "T1134", "T1547", "T1626")):
+                        "T1134", "T1547", "T1626")):
         return "pe"
     if mitre.startswith(("T1486", "T1490")):
         return "ra"
     if mitre.startswith(("T1105", "T1565", "T1562",
-                         "T1070", "T1543", "T1003")):
+                        "T1070", "T1543", "T1003")):
         return "fim"
 
     # ── 4. Fallback ──
@@ -462,7 +462,7 @@ def alerts_feed():
     # ── Severity ──
     if sev in ("critical", "high", "medium", "low"):
         ranges = {"critical": (16, 999), "high": (14, 15),
-                  "medium": (12, 13),      "low": (0, 11)}
+                "medium": (12, 13),      "low": (0, 11)}
         lo, hi = ranges[sev]
         where.append("level BETWEEN %s AND %s")
         params.extend([lo, hi])
@@ -478,7 +478,7 @@ def alerts_feed():
 
     sql = """
         SELECT id, agent, agent_ip, description, level, mitre_id, rule_id,
-               source_ip, target_user, threat_type, time
+            source_ip, target_user, threat_type, time
         FROM alerts
         {where}
         ORDER BY time DESC NULLS LAST, id DESC
@@ -568,8 +568,8 @@ def api_dashboard():
             """, (start_of_window, now, start_of_window))
             trend = [
                 {"date": r["day"].isoformat(),
-                 "total": r["total"],
-                 "critical": r["critical"]}
+                "total": r["total"],
+                "critical": r["critical"]}
                 for r in cur.fetchall()
             ]
 
@@ -592,24 +592,24 @@ def api_dashboard():
                 LIMIT 6
             """)
             top_agents = [{"agent": r["agent"], "count": int(r["count"])}
-                          for r in cur.fetchall()]
+                        for r in cur.fetchall()]
 
             cur.execute("""
                 SELECT source_ip, count(*) AS count
                 FROM alerts
                 WHERE source_ip IS NOT NULL
-                  AND source_ip <> 'N/A'
-                  AND source_ip <> 'unknown'
+                AND source_ip <> 'N/A'
+                AND source_ip <> 'unknown'
                 GROUP BY source_ip
                 ORDER BY count DESC
                 LIMIT 6
             """)
             top_ips = [{"ip": r["source_ip"], "count": int(r["count"])}
-                       for r in cur.fetchall()]
+                    for r in cur.fetchall()]
 
             cur.execute("""
                 SELECT id, agent, agent_ip, description, level, mitre_id,
-                       rule_id, source_ip, target_user, threat_type, time
+                    rule_id, source_ip, target_user, threat_type, time
                 FROM alerts
                 ORDER BY time DESC NULLS LAST, id DESC
                 LIMIT 8
@@ -854,8 +854,8 @@ def _check_db():
 
             cur.execute("""
                 SELECT count(*) AS n,
-                       min(time) AS oldest,
-                       max(time) AS newest
+                    min(time) AS oldest,
+                    max(time) AS newest
                 FROM alerts
             """)
             r = cur.fetchone()
@@ -1204,7 +1204,7 @@ def api_incident_create():
                         f"Case {case_ref} opened — {threat_type} on {agent}",
                         actor="System")
             _audit(cur, "Case opened", case_ref,
-                   f"{threat_type} on {agent}", actor="System")
+                f"{threat_type} on {agent}", actor="System")
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
@@ -1261,7 +1261,7 @@ def api_incident_update(case_id):
                 _case_event(cur, case_id, "status_change",
                             f"Status changed to {row['status']}", actor="System")
                 _audit(cur, "Case status changed", row["case_ref"],
-                       f"Status set to {row['status']}")
+                    f"Status set to {row['status']}")
             if "curStep" in body:
                 _case_event(cur, case_id, "step_change",
                             f"Step {row['cur_step']} of {row['total_steps']}")
@@ -1325,7 +1325,7 @@ def api_incident_from_alert(alert_id):
             _case_event(cur, new_row["id"], "opened",
                         f"Case {case_ref} opened from detection {alert_id}", actor="System")
             _audit(cur, "Case opened from detection", case_ref,
-                   f"Alert #{alert_id} — {title}")
+                f"Alert #{alert_id} — {title}")
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
@@ -1343,160 +1343,160 @@ PLAYBOOKS = {
         "name": "Ransomware Analysis & Response Guide",
         "steps": [
             {"title": "Isolate the affected system",
-             "plain": "Disconnect the affected computer from the network to stop active encryption and limit spread.",
-             "linux": "sudo iptables -I INPUT -j DROP\nsudo iptables -I OUTPUT -j DROP",
-             "windows": "netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound",
-             "expected": "The affected system can no longer communicate with the network."},
+            "plain": "Disconnect the affected computer from the network to stop active encryption and limit spread.",
+            "linux": "sudo iptables -I INPUT -j DROP\nsudo iptables -I OUTPUT -j DROP",
+            "windows": "netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound",
+            "expected": "The affected system can no longer communicate with the network."},
             {"title": "Identify the ransomware activity",
-             "plain": "Identify the suspicious process, executable, file extensions, and network connections associated with the ransomware.",
-             "linux": "ps aux --sort=-%cpu | head -20\nnetstat -tulnp",
-             "windows": "Get-Process | Sort-Object CPU -Descending | Select -First 20\nnetstat -ano",
-             "expected": "You have identified the suspicious process and relevant network indicators."},
+            "plain": "Identify the suspicious process, executable, file extensions, and network connections associated with the ransomware.",
+            "linux": "ps aux --sort=-%cpu | head -20\nnetstat -tulnp",
+            "windows": "Get-Process | Sort-Object CPU -Descending | Select -First 20\nnetstat -ano",
+            "expected": "You have identified the suspicious process and relevant network indicators."},
             {"title": "Preserve evidence",
-             "plain": "Capture logs, process information, network information, screenshots, and suspicious file details before removing the malware.",
-             "linux": "dmesg > /tmp/kernel_log.txt\ncp /var/log/syslog /tmp/syslog_backup.txt",
-             "windows": "Get-EventLog -LogName Security -Newest 500 | Export-Csv events.csv\nipconfig /all > network_info.txt",
-             "expected": "Evidence is stored and can be attached to the incident case."},
+            "plain": "Capture logs, process information, network information, screenshots, and suspicious file details before removing the malware.",
+            "linux": "dmesg > /tmp/kernel_log.txt\ncp /var/log/syslog /tmp/syslog_backup.txt",
+            "windows": "Get-EventLog -LogName Security -Newest 500 | Export-Csv events.csv\nipconfig /all > network_info.txt",
+            "expected": "Evidence is stored and can be attached to the incident case."},
             {"title": "Stop the malicious process",
-             "plain": "Terminate the confirmed ransomware process after evidence has been preserved.",
-             "linux": "sudo kill -9 [PID]",
-             "windows": "Stop-Process -Id [PID] -Force",
-             "expected": "The ransomware process is no longer running."},
+            "plain": "Terminate the confirmed ransomware process after evidence has been preserved.",
+            "linux": "sudo kill -9 [PID]",
+            "windows": "Stop-Process -Id [PID] -Force",
+            "expected": "The ransomware process is no longer running."},
             {"title": "Block the attacker connection",
-             "plain": "Block identified command-and-control or malicious external addresses.",
-             "linux": "sudo iptables -I OUTPUT -d [ATTACKER_IP] -j DROP",
-             "windows": 'New-NetFirewallRule -DisplayName "Block Ransomware C2" -Direction Outbound -RemoteAddress [ATTACKER_IP] -Action Block',
-             "expected": "The identified malicious connection is blocked."},
+            "plain": "Block identified command-and-control or malicious external addresses.",
+            "linux": "sudo iptables -I OUTPUT -d [ATTACKER_IP] -j DROP",
+            "windows": 'New-NetFirewallRule -DisplayName "Block Ransomware C2" -Direction Outbound -RemoteAddress [ATTACKER_IP] -Action Block',
+            "expected": "The identified malicious connection is blocked."},
             {"title": "Recover and verify",
-             "plain": "Restore affected files or systems from a known-clean backup.",
-             "linux": "rsync -av /backup/pre-attack/ /data/restored/",
-             "windows": "wbadmin start recovery -version:[BACKUP_VERSION]",
-             "expected": "Clean data is restored and the recovered system passes basic verification."},
+            "plain": "Restore affected files or systems from a known-clean backup.",
+            "linux": "rsync -av /backup/pre-attack/ /data/restored/",
+            "windows": "wbadmin start recovery -version:[BACKUP_VERSION]",
+            "expected": "Clean data is restored and the recovered system passes basic verification."},
             {"title": "Confirm clean state and close",
-             "plain": "Confirm the ransomware activity has stopped and the response record is complete before closing the incident.",
-             "linux": "# Verify services, logs, and restored files before reconnecting the host",
-             "windows": "# Verify services, logs, and restored files before reconnecting the host",
-             "expected": "The environment is stable and the incident is ready to close."},
+            "plain": "Confirm the ransomware activity has stopped and the response record is complete before closing the incident.",
+            "linux": "# Verify services, logs, and restored files before reconnecting the host",
+            "windows": "# Verify services, logs, and restored files before reconnecting the host",
+            "expected": "The environment is stable and the incident is ready to close."},
         ],
     },
     "bruteforce": {
         "name": "Brute Force Response Guide",
         "steps": [
             {"title": "Block the attacking source",
-             "plain": "Block the source address responsible for the repeated authentication attempts.",
-             "linux": "sudo iptables -I INPUT -s [ATTACKER_IP] -j DROP",
-             "windows": 'New-NetFirewallRule -DisplayName "Block Brute Force" -Direction Inbound -RemoteAddress [ATTACKER_IP] -Action Block',
-             "expected": "Further authentication attempts from the identified source are blocked."},
+            "plain": "Block the source address responsible for the repeated authentication attempts.",
+            "linux": "sudo iptables -I INPUT -s [ATTACKER_IP] -j DROP",
+            "windows": 'New-NetFirewallRule -DisplayName "Block Brute Force" -Direction Inbound -RemoteAddress [ATTACKER_IP] -Action Block',
+            "expected": "Further authentication attempts from the identified source are blocked."},
             {"title": "Protect targeted accounts",
-             "plain": "Lock accounts receiving excessive failed login attempts.",
-             "linux": "sudo passwd -l [username]",
-             "windows": "Disable-ADAccount -Identity [username]",
-             "expected": "Targeted accounts are protected from further access."},
+            "plain": "Lock accounts receiving excessive failed login attempts.",
+            "linux": "sudo passwd -l [username]",
+            "windows": "Disable-ADAccount -Identity [username]",
+            "expected": "Targeted accounts are protected from further access."},
             {"title": "Review authentication logs",
-             "plain": "Determine which accounts were targeted and whether any successful login occurred.",
-             "linux": "grep 'Failed password' /var/log/auth.log | tail -100\ngrep 'Accepted' /var/log/auth.log | tail -50",
-             "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624,4625} -MaxEvents 100',
-             "expected": "You know which accounts were targeted and whether successful authentication occurred."},
+            "plain": "Determine which accounts were targeted and whether any successful login occurred.",
+            "linux": "grep 'Failed password' /var/log/auth.log | tail -100\ngrep 'Accepted' /var/log/auth.log | tail -50",
+            "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624,4625} -MaxEvents 100',
+            "expected": "You know which accounts were targeted and whether successful authentication occurred."},
             {"title": "Reset affected credentials",
-             "plain": "Reset credentials for accounts that were targeted or successfully accessed.",
-             "linux": "sudo passwd [username]",
-             "windows": "Set-ADAccountPassword -Identity [username] -Reset",
-             "expected": "Affected accounts have new credentials."},
+            "plain": "Reset credentials for accounts that were targeted or successfully accessed.",
+            "linux": "sudo passwd [username]",
+            "windows": "Set-ADAccountPassword -Identity [username] -Reset",
+            "expected": "Affected accounts have new credentials."},
             {"title": "Strengthen authentication controls",
-             "plain": "Review lockout and authentication controls to reduce the chance of repeated attacks.",
-             "linux": "sudo systemctl enable fail2ban --now",
-             "windows": "Set-ADDefaultDomainPasswordPolicy -LockoutThreshold 5 -LockoutDuration 00:30:00",
-             "expected": "The environment has stronger controls against repeated authentication attempts."},
+            "plain": "Review lockout and authentication controls to reduce the chance of repeated attacks.",
+            "linux": "sudo systemctl enable fail2ban --now",
+            "windows": "Set-ADDefaultDomainPasswordPolicy -LockoutThreshold 5 -LockoutDuration 00:30:00",
+            "expected": "The environment has stronger controls against repeated authentication attempts."},
             {"title": "Document and close",
-             "plain": "Record the attack source, affected accounts, successful logins, actions taken, and final outcome.",
-             "linux": "# Complete incident notes and close when verified",
-             "windows": "# Complete incident notes and close when verified",
-             "expected": "The incident has a complete response record."},
+            "plain": "Record the attack source, affected accounts, successful logins, actions taken, and final outcome.",
+            "linux": "# Complete incident notes and close when verified",
+            "windows": "# Complete incident notes and close when verified",
+            "expected": "The incident has a complete response record."},
             {"title": "Verify and close the case",
-             "plain": "Confirm repeated authentication attempts have stopped and the response record is complete.",
-             "linux": "# Review recent authentication events",
-             "windows": "# Review recent Security events",
-             "expected": "No continued brute force activity is observed and the case is ready to close."},
+            "plain": "Confirm repeated authentication attempts have stopped and the response record is complete.",
+            "linux": "# Review recent authentication events",
+            "windows": "# Review recent Security events",
+            "expected": "No continued brute force activity is observed and the case is ready to close."},
         ],
     },
     "privilege": {
         "name": "Privilege Escalation Response Guide",
         "steps": [
             {"title": "Identify the account and command",
-             "plain": "Confirm which account performed the unexpected administrative action.",
-             "linux": "last -F [username]\nhistory | tail -50",
-             "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4688} -MaxEvents 100',
-             "expected": "The account, command, time, and system are identified."},
+            "plain": "Confirm which account performed the unexpected administrative action.",
+            "linux": "last -F [username]\nhistory | tail -50",
+            "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4688} -MaxEvents 100',
+            "expected": "The account, command, time, and system are identified."},
             {"title": "Preserve relevant evidence",
-             "plain": "Save authentication, process, and system logs before changing the account.",
-             "linux": "cp /var/log/auth.log /tmp/auth_evidence.log\nps aux > /tmp/processes.txt",
-             "windows": "Get-WinEvent -LogName Security -MaxEvents 500 | Export-Csv security_events.csv",
-             "expected": "Relevant evidence is preserved."},
+            "plain": "Save authentication, process, and system logs before changing the account.",
+            "linux": "cp /var/log/auth.log /tmp/auth_evidence.log\nps aux > /tmp/processes.txt",
+            "windows": "Get-WinEvent -LogName Security -MaxEvents 500 | Export-Csv security_events.csv",
+            "expected": "Relevant evidence is preserved."},
             {"title": "Restrict suspicious access",
-             "plain": "Temporarily remove elevated access or lock the account if the activity is not authorised.",
-             "linux": "sudo passwd -l [username]",
-             "windows": "Disable-ADAccount -Identity [username]",
-             "expected": "The suspicious account can no longer perform additional privileged actions."},
+            "plain": "Temporarily remove elevated access or lock the account if the activity is not authorised.",
+            "linux": "sudo passwd -l [username]",
+            "windows": "Disable-ADAccount -Identity [username]",
+            "expected": "The suspicious account can no longer perform additional privileged actions."},
             {"title": "Check for persistence",
-             "plain": "Look for newly created admin accounts, scheduled tasks, services, startup entries.",
-             "linux": "getent group sudo\nsystemctl list-unit-files --state=enabled",
-             "windows": "Get-LocalGroupMember Administrators\nGet-ScheduledTask",
-             "expected": "No unauthorised persistence remains, or suspicious persistence is documented."},
+            "plain": "Look for newly created admin accounts, scheduled tasks, services, startup entries.",
+            "linux": "getent group sudo\nsystemctl list-unit-files --state=enabled",
+            "windows": "Get-LocalGroupMember Administrators\nGet-ScheduledTask",
+            "expected": "No unauthorised persistence remains, or suspicious persistence is documented."},
             {"title": "Restore approved privileges",
-             "plain": "Remove unauthorised privilege changes and restore the account to its approved role.",
-             "linux": "# Remove unauthorised group membership and restore approved access",
-             "windows": "# Remove unauthorised group membership and restore approved access",
-             "expected": "The account has only its approved permissions."},
+            "plain": "Remove unauthorised privilege changes and restore the account to its approved role.",
+            "linux": "# Remove unauthorised group membership and restore approved access",
+            "windows": "# Remove unauthorised group membership and restore approved access",
+            "expected": "The account has only its approved permissions."},
             {"title": "Document and close",
-             "plain": "Record the escalation path, evidence, containment actions, and final determination.",
-             "linux": "# Complete incident notes and close when verified",
-             "windows": "# Complete incident notes and close when verified",
-             "expected": "The privilege escalation incident is fully documented."},
+            "plain": "Record the escalation path, evidence, containment actions, and final determination.",
+            "linux": "# Complete incident notes and close when verified",
+            "windows": "# Complete incident notes and close when verified",
+            "expected": "The privilege escalation incident is fully documented."},
             {"title": "Verify and close the case",
-             "plain": "Confirm approved access is restored and the incident record is complete.",
-             "linux": "# Verify approved privileges",
-             "windows": "# Verify approved privileges",
-             "expected": "Approved access is confirmed and the case is ready to close."},
+            "plain": "Confirm approved access is restored and the incident record is complete.",
+            "linux": "# Verify approved privileges",
+            "windows": "# Verify approved privileges",
+            "expected": "Approved access is confirmed and the case is ready to close."},
         ],
     },
     "fileintegrity": {
         "name": "File Integrity Management Response Guide",
         "steps": [
             {"title": "Identify the changed files",
-             "plain": "Review the file integrity alert and identify which protected files changed.",
-             "linux": "stat [FILE]\nls -l [FILE]",
-             "windows": "Get-Item [FILE] | Format-List *",
-             "expected": "The changed files and timestamps are identified."},
+            "plain": "Review the file integrity alert and identify which protected files changed.",
+            "linux": "stat [FILE]\nls -l [FILE]",
+            "windows": "Get-Item [FILE] | Format-List *",
+            "expected": "The changed files and timestamps are identified."},
             {"title": "Preserve evidence",
-             "plain": "Capture the current file state, relevant logs, and the account responsible.",
-             "linux": "sha256sum [FILE] > /tmp/file_hash.txt\ncp /var/log/auth.log /tmp/auth_evidence.log",
-             "windows": "Get-FileHash [FILE] -Algorithm SHA256 | Out-File file_hash.txt",
-             "expected": "The original change and supporting evidence are recorded."},
+            "plain": "Capture the current file state, relevant logs, and the account responsible.",
+            "linux": "sha256sum [FILE] > /tmp/file_hash.txt\ncp /var/log/auth.log /tmp/auth_evidence.log",
+            "windows": "Get-FileHash [FILE] -Algorithm SHA256 | Out-File file_hash.txt",
+            "expected": "The original change and supporting evidence are recorded."},
             {"title": "Determine whether the change was authorised",
-             "plain": "Compare the change with approved maintenance, deployment, or admin activity.",
-             "linux": "# Compare timestamps with approved maintenance records",
-             "windows": "# Compare timestamps with approved maintenance records",
-             "expected": "The change is classified as authorised or suspicious."},
+            "plain": "Compare the change with approved maintenance, deployment, or admin activity.",
+            "linux": "# Compare timestamps with approved maintenance records",
+            "windows": "# Compare timestamps with approved maintenance records",
+            "expected": "The change is classified as authorised or suspicious."},
             {"title": "Contain suspicious activity",
-             "plain": "If the change is unauthorised, restrict the responsible account or process.",
-             "linux": "sudo passwd -l [username]",
-             "windows": "Disable-ADAccount -Identity [username]",
-             "expected": "Further unauthorised changes are prevented while investigation continues."},
+            "plain": "If the change is unauthorised, restrict the responsible account or process.",
+            "linux": "sudo passwd -l [username]",
+            "windows": "Disable-ADAccount -Identity [username]",
+            "expected": "Further unauthorised changes are prevented while investigation continues."},
             {"title": "Restore the approved file state",
-             "plain": "Restore the affected configuration from a known-good source.",
-             "linux": "cp /backup/approved/[FILE] [FILE]",
-             "windows": "# Restore the approved file version from your configuration backup",
-             "expected": "The protected file matches the approved configuration."},
+            "plain": "Restore the affected configuration from a known-good source.",
+            "linux": "cp /backup/approved/[FILE] [FILE]",
+            "windows": "# Restore the approved file version from your configuration backup",
+            "expected": "The protected file matches the approved configuration."},
             {"title": "Document and close",
-             "plain": "Record the changed files, authorisation decision, evidence, corrective action, and final outcome.",
-             "linux": "# Complete incident notes and close when verified",
-             "windows": "# Complete incident notes and close when verified",
-             "expected": "The file integrity incident is fully documented."},
+            "plain": "Record the changed files, authorisation decision, evidence, corrective action, and final outcome.",
+            "linux": "# Complete incident notes and close when verified",
+            "windows": "# Complete incident notes and close when verified",
+            "expected": "The file integrity incident is fully documented."},
             {"title": "Verify system stability and close",
-             "plain": "Monitor the protected files after restoration to confirm no unexpected changes recur.",
-             "linux": "# Verify file hashes and monitor for additional changes",
-             "windows": "# Verify file hashes and monitor for additional changes",
-             "expected": "The approved file state remains stable and the case is ready to close."},
+            "plain": "Monitor the protected files after restoration to confirm no unexpected changes recur.",
+            "linux": "# Verify file hashes and monitor for additional changes",
+            "windows": "# Verify file hashes and monitor for additional changes",
+            "expected": "The approved file state remains stable and the case is ready to close."},
         ],
     },
 }
@@ -1552,12 +1552,12 @@ def api_step_complete(case_id, step_num):
             _case_event(cur, case_id, "step_done",
                         f"Step {step_num + 1} completed — {step_title}")
             _audit(cur, "Playbook step completed", case["case_ref"],
-                   f"Step {step_num + 1}: {step_title}")
+                f"Step {step_num + 1}: {step_title}")
             if new_step >= case["total_steps"]:
                 _case_event(cur, case_id, "status_change",
                             "All steps complete — case moved to Contained")
                 _audit(cur, "Playbook completed", case["case_ref"],
-                       "All response steps completed")
+                    "All response steps completed")
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -1593,7 +1593,7 @@ def api_step_undo(case_id, step_num):
             _case_event(cur, case_id, "step_undo",
                         f"Step {step_num + 1} undone — {step_title}")
             _audit(cur, "Playbook step undone", case["case_ref"],
-                   f"Step {step_num + 1}")
+                f"Step {step_num + 1}")
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -1670,10 +1670,10 @@ def api_playbooks_list():
 
             cur.execute("""
                 SELECT DISTINCT ON (playbook_key)
-                       playbook_key, id, case_ref, agent_name, severity
+                    playbook_key, id, case_ref, agent_name, severity
                 FROM cases
                 WHERE status NOT IN ('resolved','false-positive')
-                  AND playbook_key IS NOT NULL
+                AND playbook_key IS NOT NULL
                 ORDER BY playbook_key, opened_at ASC
             """)
             active_cases = {r["playbook_key"]: {
@@ -1860,7 +1860,7 @@ def api_reports_list():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT r.id, r.report_ref, r.case_id, r.created_at, r.generated_by,
-                       c.case_ref, c.threat_type, c.severity
+                    c.case_ref, c.threat_type, c.severity
                 FROM reports r
                 JOIN cases c ON c.id = r.case_id
                 ORDER BY r.created_at DESC
@@ -2076,7 +2076,7 @@ def api_analysis():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT id, agent, agent_ip, description, level, mitre_id,
-                       rule_id, source_ip, target_user, threat_type, time
+                    rule_id, source_ip, target_user, threat_type, time
                 FROM alerts
                 ORDER BY time DESC NULLS LAST, id DESC
             """)
@@ -2292,7 +2292,7 @@ def api_metrics():
             "fpr30":             fpr_30,
         },
         "disclaimer": "MTTD, MTTR, false-positive rate, and monthly history are demo placeholders. "
-                      "Real alert counts, cases, and reports come from the live database.",
+                    "Real alert counts, cases, and reports come from the live database.",
     })
 
 
@@ -2378,8 +2378,8 @@ def api_settings_update():
                 params,
             )
             _audit(cur, "Settings updated", "Settings",
-                   ", ".join(mapping[k] for k in body if k in mapping),
-                   actor="Administrator")
+                ", ".join(mapping[k] for k in body if k in mapping),
+                actor="Administrator")
             s = _get_settings(cur)
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -2449,7 +2449,7 @@ def api_users_create():
             )
             new = cur.fetchone()
             _audit(cur, "User created", new["username"],
-                   f"Role: {new['role']}", actor=session["display_name"])
+                f"Role: {new['role']}", actor=session["display_name"])
     except psycopg2.errors.UniqueViolation:
         return jsonify({"status": "error", "error": f"username '{username}' already exists"}), 409
     except Exception as e:
@@ -2499,8 +2499,8 @@ def api_users_update(user_id):
             if not row:
                 return jsonify({"status": "error", "error": "user not found"}), 404
             _audit(cur, "User updated", row["username"],
-                   ", ".join(f"{k}={v}" for k, v in body.items()),
-                   actor=session["display_name"])
+                ", ".join(f"{k}={v}" for k, v in body.items()),
+                actor=session["display_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 

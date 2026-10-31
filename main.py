@@ -1,3 +1,4 @@
+import os
 import hashlib
 import time
 from datetime import datetime
@@ -6,16 +7,16 @@ import psycopg2
 import requests
 
 DB_CONFIG = {
-    "dbname":   "zerorespong_db",
-    "user":     "zero",
-    "password": "Zero@post1122",
-    "host":     "localhost",
-    "port":     "5432",
+    "dbname":   os.getenv("PG_DB", "zerorespong_db"),
+    "user":     os.getenv("PG_USER", "zero"),
+    "password": os.getenv("PG_PASSWORD", "Zero@post1122"),
+    "host":     os.getenv("PG_HOST", "localhost"), # Will be 'db' in docker
+    "port":     os.getenv("PG_PORT", "5432"),
 }
 
-API_URL       = "http://192.168.244.131:5000/api/v1/alerts"
+# Will be http://webhook:5000/api/v1/alerts in docker
+API_URL = os.getenv("API_URL", "http://webhook:5000/api/v1/alerts")
 POLL_INTERVAL = 60
-
 
 def _dedup_hash(alert):
     parts = [
