@@ -10,6 +10,45 @@
   <script src="https://unpkg.com/lucide@latest"></script>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/zerorespond.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/incidents.css') }}">
+
+  <style>
+    /* Agent picker row — inline label + select + sync button */
+    .agent-picker-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+    .agent-picker-row .form-select {
+      flex: 1;
+      min-width: 0;
+    }
+    .agent-picker-row .btn-sync {
+      flex-shrink: 0;
+      white-space: nowrap;
+    }
+    .agent-picker-meta {
+      font-size: 11.5px;
+      color: var(--text-3);
+      margin-top: 5px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 16px;
+    }
+    .agent-picker-meta .dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .agent-picker-meta .dot.online  { background: #4ade80; }
+    .agent-picker-meta .dot.offline { background: #ef4444; }
+    .agent-picker-meta .dot.unknown { background: #94a3b8; }
+
+    .btn-sync.spinning .ui-icon { animation: spin 0.9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
 </head>
 <body>
 
@@ -38,7 +77,7 @@
 
     <div class="sb-section-label">System</div>
     <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
-        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
+    <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
   </div>
   <div class="sb-footer">
     <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
@@ -144,8 +183,17 @@
         </div>
 
         <div class="form-group">
-          <label class="form-label">Affected computer *</label>
-          <input class="form-input" id="ni-agent" placeholder="e.g. KCTLAB-WIN03, 10.0.0.25">
+          <label class="form-label">Affected agent *</label>
+          <div class="agent-picker-row">
+            <select class="form-select" id="ni-agent" onchange="updateAgentHint()">
+              <option value="">Loading agents…</option>
+            </select>
+            <button class="btn btn-secondary btn-sm btn-sync" type="button"
+                    onclick="syncAgents(this)" title="Pull the latest agent list from Wazuh">
+              <i data-lucide="refresh-cw" class="ui-icon"></i> Sync
+            </button>
+          </div>
+          <div class="agent-picker-meta" id="ni-agent-meta"></div>
         </div>
 
         <div class="form-group">
@@ -204,6 +252,7 @@ tickClock(); setInterval(tickClock, 1000);
 // ── State ─────────────────────────────────────────────
 let CUR_TAB = 'all';
 let DEBOUNCE = null;
+let AGENT_CACHE = [];   // last loaded agents, so updateAgentHint can look up by name
 
 const SEV_LABEL = { critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low' };
 const STATUS_LABEL = {
@@ -222,7 +271,7 @@ const THREAT_ICON = {
   'File Integrity':      'folder',
 };
 
-// ── Loader ────────────────────────────────────────────
+// ── Loader (cases table) ──────────────────────────────
 function debouncedLoad() {
   clearTimeout(DEBOUNCE);
   DEBOUNCE = setTimeout(loadCases, 300);
@@ -301,15 +350,110 @@ function openCase(id) {
   window.location = '/incidents/' + id;
 }
 
+// ── Agent picker ──────────────────────────────────────
+async function loadAgentsForModal() {
+  const sel  = document.getElementById('ni-agent');
+  const meta = document.getElementById('ni-agent-meta');
+  meta.innerHTML = '<span class="spin" style="margin-right:4px"></span>Loading agents…';
+
+  try {
+    const r = await fetch('/api/v1/automation/agents', { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    AGENT_CACHE = body.data || [];
+
+    if (!AGENT_CACHE.length) {
+      sel.innerHTML = '<option value="">No agents registered</option>';
+      meta.innerHTML = '<span style="color:var(--c-high)">No agents in the inventory — click Sync to import from Wazuh.</span>';
+      return;
+    }
+
+    sel.innerHTML = AGENT_CACHE.map(a => {
+      const proto = a.wazuhStatus ? ` · wazuh:${a.wazuhStatus}` : '';
+      const auto  = a.online ? ' · automation:online'
+                  : a.lastSeen ? ' · automation:offline'
+                  : ' · automation:never';
+      return `<option value="${escapeHtml(a.name)}">
+        ${escapeHtml(a.name)} — ${escapeHtml(a.os)} — ${escapeHtml(a.ip || '?')}${proto}${auto}
+      </option>`;
+    }).join('');
+
+    // Prefer an online agent if one exists
+    const firstOnline = AGENT_CACHE.find(a => a.online);
+    if (firstOnline) sel.value = firstOnline.name;
+
+    updateAgentHint();
+  } catch (err) {
+    sel.innerHTML = '<option value="">Could not load agents</option>';
+    meta.innerHTML = `<span style="color:var(--c-critical)">${escapeHtml(err.message)}</span>`;
+  }
+}
+
+function updateAgentHint() {
+  const sel  = document.getElementById('ni-agent');
+  const meta = document.getElementById('ni-agent-meta');
+  const name = sel.value;
+  const a = AGENT_CACHE.find(x => x.name === name);
+  if (!a) { meta.innerHTML = ''; return; }
+
+  let dotCls = 'unknown';
+  let dotTxt = 'never seen by the automation agent';
+  if (a.online) {
+    dotCls = 'online';
+    dotTxt = a.lastSeenAge != null ? `automation online · last seen ${a.lastSeenAge}s ago`
+                                   : 'automation online';
+  } else if (a.lastSeen) {
+    dotCls = 'offline';
+    const age = a.lastSeenAge != null
+      ? (a.lastSeenAge < 60 ? `${a.lastSeenAge}s` : `${Math.floor(a.lastSeenAge/60)}m`)
+      : '—';
+    dotTxt = `automation offline · last seen ${age} ago`;
+  }
+
+  const wazuhPart = a.wazuhStatus ? ` · Wazuh: ${a.wazuhStatus}` : '';
+  meta.innerHTML =
+    `<span class="dot ${dotCls}"></span>` +
+    `<span>${escapeHtml(dotTxt + wazuhPart)}</span>`;
+}
+
+async function syncAgents(btn) {
+  const meta = document.getElementById('ni-agent-meta');
+  const orig = btn.innerHTML;
+  btn.disabled = true;
+  btn.classList.add('spinning');
+  btn.innerHTML = '<i data-lucide="refresh-cw" class="ui-icon"></i> Syncing…';
+  refreshIcons(btn);
+  meta.innerHTML = '<span class="spin" style="margin-right:4px"></span>Fetching agents from Wazuh…';
+
+  try {
+    const r = await fetch('/api/v1/automation/agents/sync', { method: 'POST' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Sync failed');
+
+    const d = body.data || {};
+    meta.innerHTML = `<span style="color:var(--c-low)">Synced · ${d.inserted ?? 0} new, ${d.updated ?? 0} updated.</span>`;
+    await loadAgentsForModal();
+    // Preserve the "Synced" note briefly, then restore the normal hint
+    setTimeout(updateAgentHint, 2500);
+  } catch (err) {
+    meta.innerHTML = `<span style="color:var(--c-critical)">Sync failed: ${escapeHtml(err.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove('spinning');
+    btn.innerHTML = orig;
+    refreshIcons(btn);
+  }
+}
+
 // ── New Incident Modal ────────────────────────────────
 function openNewIncidentModal() {
   document.getElementById('ni-type').value = 'Ransomware';
-  document.getElementById('ni-agent').value = '';
   document.getElementById('ni-desc').value = '';
   document.getElementById('ni-sev-m').checked = true;
   document.getElementById('ni-assign').value = 'IT Team';
   document.getElementById('new-incident-modal').style.display = 'flex';
   refreshIcons(document.getElementById('new-incident-modal'));
+  loadAgentsForModal();
 }
 
 function closeNewIncidentModal() {
@@ -318,22 +462,22 @@ function closeNewIncidentModal() {
 
 async function createIncident() {
   const type   = document.getElementById('ni-type').value;
-  const agent  = document.getElementById('ni-agent').value.trim();
+  const agent  = document.getElementById('ni-agent').value;
   const desc   = document.getElementById('ni-desc').value.trim();
   const sev    = document.querySelector('input[name="ni-sev"]:checked')?.value || 'medium';
   const assign = document.getElementById('ni-assign').value;
 
-  if (!agent) { alert('Please enter the affected computer.'); return; }
+  if (!agent) { alert('Please select the affected agent.'); return; }
   if (!desc)  { alert('Please describe what you observed.'); return; }
 
   const body = {
-    threatType:  type,
-    agent:       agent,
-    title:       desc.split('.')[0].slice(0, 120),
-    description: desc,
-    severity:    sev,
-    assignedTo:  assign,
-    dataCategories: 'To be determined',
+    threatType:      type,
+    agent:           agent,
+    title:           desc.split('.')[0].slice(0, 120),
+    description:     desc,
+    severity:        sev,
+    assignedTo:      assign,
+    dataCategories:  'To be determined',
     personsAffected: 0,
   };
 
@@ -349,7 +493,6 @@ async function createIncident() {
     }
     closeNewIncidentModal();
     loadCases();
-    // Jump into the new case
     if (resp.data && resp.data.id) {
       setTimeout(() => openCase(resp.data.id), 300);
     }
@@ -369,7 +512,8 @@ function escapeHtml(s) {
 loadCases();
 setInterval(() => {
   const focused = document.activeElement === document.getElementById('inc-search');
-  if (!focused) loadCases();
+  const modalOpen = document.getElementById('new-incident-modal').style.display !== 'none';
+  if (!focused && !modalOpen) loadCases();
 }, 30000);
 </script>
 </body>

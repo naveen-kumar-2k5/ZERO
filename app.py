@@ -1,24 +1,37 @@
 import os
 import time
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+from dotenv import load_dotenv
+
+# Load .env from the directory containing app.py (works regardless of CWD).
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 import psycopg2
 import psycopg2.extras
+import psycopg2.errors
 import requests
 import urllib3
 from flask import Flask, jsonify, render_template, request, session, redirect, url_for, abort
 import hashlib
 import secrets
+import base64
 from functools import wraps
+from app_vuln import vuln_bp
+
+# Step execution: the endpoint runs reciver.py, and sender.send_command()
+# is the client that talks to it. Both files live alongside app.py.
+from sender import send_command
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
-
 app = Flask(__name__)
 
 # ─────────────────────────────────────────────────────
 # Auth Config (Required for sessions)
 # ─────────────────────────────────────────────────────
 app.secret_key = os.getenv("SECRET_KEY", "dev-only-secret-key-change-me")
+app.register_blueprint(vuln_bp)
 
 # ─────────────────────────────────────────────────────
 # Configuration
@@ -26,7 +39,7 @@ app.secret_key = os.getenv("SECRET_KEY", "dev-only-secret-key-change-me")
 DB_CONFIG = {
     "dbname":   os.getenv("PG_DB",       "zerorespong_db"),
     "user":     os.getenv("PG_USER",     "zero"),
-    "password": os.getenv("PG_PASSWORD", "Zero@post1122"),
+    "password": os.getenv("PG_PASSWORD", ""),
     "host":     os.getenv("PG_HOST",     "localhost"),
     "port":     os.getenv("PG_PORT",     "5432"),
 }
@@ -37,7 +50,13 @@ POLLER_STALE_SEC = int(os.getenv("POLLER_STALE_SEC", "300"))
 
 WAZUH_HOST = os.getenv("WAZUH_HOST", "https://192.168.244.131:55000")
 WAZUH_USER = os.getenv("WAZUH_USER", "wazuh-wui")
-WAZUH_PASS = os.getenv("WAZUH_PASS", "MyS3cr37P450r.*-")
+WAZUH_PASS = os.getenv("WAZUH_PASS", "")
+
+# Warn if the leaked default still applies in production
+if os.getenv("APP_ENV") == "production":
+    _missing = [k for k in ("SECRET_KEY", "WAZUH_PASS", "PG_PASSWORD") if not os.getenv(k)]
+    if _missing:
+        raise RuntimeError(f"missing required secrets in production: {_missing}")
 
 
 def get_conn():
@@ -46,17 +65,48 @@ def get_conn():
 
 
 # ─────────────────────────────────────────────────────
-# Auth Helpers & Decorators
+# Password hashing — PBKDF2-HMAC-SHA256, per-user salt, rehash-on-login
 # ─────────────────────────────────────────────────────
-def _hash_password(plain):
-    return hashlib.sha256(plain.encode("utf-8")).hexdigest()
+_PBKDF2_ITERATIONS = 600_000
+_PBKDF2_PREFIX     = "pbkdf2_sha256"
 
-def _verify_password(plain, expected_hash):
-    return secrets.compare_digest(_hash_password(plain), expected_hash)
+
+def _hash_password(plain: str) -> str:
+    """Return a self-describing hash string: pbkdf2_sha256$<iters>$<salt_b64>$<hash_b64>."""
+    salt = secrets.token_bytes(16)
+    h = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return "{}${}${}${}".format(
+        _PBKDF2_PREFIX,
+        _PBKDF2_ITERATIONS,
+        base64.b64encode(salt).decode("ascii"),
+        base64.b64encode(h).decode("ascii"),
+    )
+
+
+def _verify_password(plain: str, expected_hash: str) -> tuple[bool, bool]:
+    """Return (ok, needs_rehash). Supports legacy unsalted SHA-256 for migration."""
+    if not expected_hash:
+        return False, False
+    if expected_hash.startswith(_PBKDF2_PREFIX + "$"):
+        try:
+            _, iters_s, salt_b64, hash_b64 = expected_hash.split("$", 3)
+            iters = int(iters_s)
+            salt = base64.b64decode(salt_b64)
+            expected = base64.b64decode(hash_b64)
+        except Exception:
+            return False, False
+        h = hashlib.pbkdf2_hmac("sha256", plain.encode("utf-8"), salt, iters)
+        ok = secrets.compare_digest(h, expected)
+        # Rehash if the iteration count is stale
+        return ok, ok and iters < _PBKDF2_ITERATIONS
+    # Legacy unsalted SHA-256 — accept once, then rehash
+    legacy = hashlib.sha256(plain.encode("utf-8")).hexdigest()
+    ok = secrets.compare_digest(legacy, expected_hash)
+    return ok, ok   # always rehash a legacy hash on successful login
+
 
 @app.context_processor
 def _inject_current_user():
-    """Makes `current_user` available in every Jinja template."""
     uid = session.get("user_id")
     if not uid:
         return {"current_user": None}
@@ -70,11 +120,11 @@ def _inject_current_user():
             r = cur.fetchone()
     except Exception:
         return {"current_user": None}
-    
+
     if not r:
         session.clear()
         return {"current_user": None}
-    
+
     return {"current_user": {
         "id":          r["id"],
         "username":    r["username"],
@@ -83,6 +133,7 @@ def _inject_current_user():
         "role":        r["role"],
     }}
 
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -90,6 +141,7 @@ def login_required(f):
             return redirect(url_for("login_page", next=request.path))
         return f(*args, **kwargs)
     return wrapper
+
 
 def admin_required(f):
     @wraps(f)
@@ -103,7 +155,7 @@ def admin_required(f):
 
 
 # ─────────────────────────────────────────────────────
-# Wazuh helper (single source of truth, token cached)
+# Wazuh helper (token cached)
 # ─────────────────────────────────────────────────────
 _token_cache = {"token": None, "expires": 0.0}
 
@@ -189,10 +241,19 @@ def api_auth_login():
             )
             row = cur.fetchone()
 
-            if not row or not _verify_password(password, row["password_hash"]):
+            if not row:
+                return jsonify({"status": "error", "error": "invalid username or password"}), 401
+            ok, needs_rehash = _verify_password(password, row["password_hash"])
+            if not ok:
                 return jsonify({"status": "error", "error": "invalid username or password"}), 401
             if row["status"] != "active":
                 return jsonify({"status": "error", "error": "account is disabled"}), 403
+
+            if needs_rehash:
+                cur.execute(
+                    "UPDATE users SET password_hash = %s WHERE id = %s",
+                    (_hash_password(password), row["id"]),
+                )
 
             cur.execute("UPDATE users SET last_login = now() WHERE id = %s", (row["id"],))
             _audit(cur, "Login", row["username"], "Successful sign-in", actor=row["display_name"])
@@ -261,7 +322,8 @@ def api_me_reset_password():
                 (session["user_id"],),
             )
             row = cur.fetchone()
-            if not row or not _verify_password(current, row["password_hash"]):
+            ok, _ = _verify_password(current, row["password_hash"]) if row else (False, False)
+            if not ok:
                 return jsonify({"status": "error", "error": "current password is incorrect"}), 401
 
             cur.execute(
@@ -277,7 +339,7 @@ def api_me_reset_password():
 
 
 # ─────────────────────────────────────────────────────
-# UI pages (Protected)
+# UI pages
 # ─────────────────────────────────────────────────────
 @app.route("/")
 @app.route("/dashboard")
@@ -317,7 +379,7 @@ def incident_detail_page(case_id):
 
 
 # ─────────────────────────────────────────────────────
-# Alerts feed API (Postgres-backed)
+# Alerts feed API
 # ─────────────────────────────────────────────────────
 LEVEL_TO_SEV = [
     (16, "critical"),
@@ -336,81 +398,39 @@ def level_to_sev(level):
 
 
 def classify_category(row):
-    """
-    Map a Wazuh alert row to one of bf / pe / fim / ra.
-
-    Priority order:
-    1. Explicit threat_type string (if Wazuh already labelled it)
-    2. Known rule_id from your local ruleset
-    3. MITRE technique family
-    4. Fallback -> "bf" (most college-instance alerts are auth)
-
-    Keep RULE_MAP in sync as you discover new rule IDs in the feed.
-    """
     tt    = (row.get("threat_type") or "").lower()
     mitre = (row.get("mitre_id")    or "").upper()
     rule  = str(row.get("rule_id")  or "")
 
-    # ── 1. Explicit threat_type ──
-    if "ransom" in tt:
-        return "ra"
-    if "brute" in tt or "credential" in tt or "password" in tt:
-        return "bf"
-    if "privilege" in tt or "escalat" in tt:
-        return "pe"
-    if "integrity" in tt or "file" in tt or "fim" in tt:
-        return "fim"
+    if "ransom" in tt:                        return "ra"
+    if "brute" in tt or "credential" in tt or "password" in tt: return "bf"
+    if "privilege" in tt or "escalat" in tt:  return "pe"
+    if "integrity" in tt or "file" in tt or "fim" in tt:        return "fim"
 
-    # ── 2. Known rule IDs ──
     RULE_MAP = {
-        # brute force / auth
-        "110002": "bf",
-        "40112":  "bf",
-        "5763":   "bf",
-        "5764":   "bf",
-        "5765":   "bf",
-        # privilege escalation
-        "5403":   "pe",
-        "5406":   "pe",
-        # file integrity / tampering / log clearing / dropped files
-        "5501":   "fim",
-        "5502":   "fim",
-        "5503":   "fim",
-        "92213":  "fim",   # executable dropped in malware folder
-        "100004": "fim",   # Windows Security Event Log cleared
-        # ransomware
-        "5800":   "ra",
-        "5801":   "ra",
-        "5802":   "ra",
+        "110002": "bf", "40112": "bf", "5763": "bf", "5764": "bf", "5765": "bf",
+        "5403": "pe",   "5406": "pe",
+        "5501": "fim",  "5502": "fim", "5503": "fim", "92213": "fim", "100004": "fim",
+        "5800": "ra",   "5801": "ra",  "5802": "ra",
     }
     if rule in RULE_MAP:
         return RULE_MAP[rule]
 
-    # ── 3. MITRE technique family ──
-    if mitre.startswith(("T1110", "T1078")):
-        return "bf"
-    if mitre.startswith(("T1068", "T1548", "T1055",
-                        "T1134", "T1547", "T1626")):
-        return "pe"
-    if mitre.startswith(("T1486", "T1490")):
-        return "ra"
-    if mitre.startswith(("T1105", "T1565", "T1562",
-                        "T1070", "T1543", "T1003")):
-        return "fim"
+    if mitre.startswith(("T1110", "T1078")):                              return "bf"
+    if mitre.startswith(("T1068", "T1548", "T1055", "T1134", "T1547", "T1626")): return "pe"
+    if mitre.startswith(("T1486", "T1490")):                              return "ra"
+    if mitre.startswith(("T1105", "T1565", "T1562", "T1070", "T1543", "T1003")): return "fim"
 
-    # ── 4. Fallback ──
     return "bf"
 
 
 def row_to_alert(row):
     sev = level_to_sev(row["level"])
     category = classify_category(row)
-
     desc = row["description"] or "Detection"
     name = desc.split(".")[0]
     if len(name) > 70:
         name = name[:67] + "…"
-
     return {
         "id":          row["id"],
         "name":        name,
@@ -442,32 +462,27 @@ def alerts_feed():
 
     where, params = [], []
 
-    # ── Time range ──
     if from_s:
         try:
             where.append("time >= %s")
             params.append(datetime.fromisoformat(from_s.replace("Z", "+00:00")))
         except ValueError:
-            return jsonify({"status": "error",
-                            "error": f"invalid 'from' timestamp: {from_s}"}), 400
+            return jsonify({"status": "error", "error": f"invalid 'from' timestamp: {from_s}"}), 400
 
     if to_s:
         try:
             where.append("time <= %s")
             params.append(datetime.fromisoformat(to_s.replace("Z", "+00:00")))
         except ValueError:
-            return jsonify({"status": "error",
-                            "error": f"invalid 'to' timestamp: {to_s}"}), 400
+            return jsonify({"status": "error", "error": f"invalid 'to' timestamp: {to_s}"}), 400
 
-    # ── Severity ──
     if sev in ("critical", "high", "medium", "low"):
         ranges = {"critical": (16, 999), "high": (14, 15),
-                "medium": (12, 13),      "low": (0, 11)}
+                  "medium": (12, 13), "low": (0, 11)}
         lo, hi = ranges[sev]
         where.append("level BETWEEN %s AND %s")
         params.extend([lo, hi])
 
-    # ── Search ──
     if q:
         where.append(
             "(description ILIKE %s OR agent ILIKE %s "
@@ -568,8 +583,8 @@ def api_dashboard():
             """, (start_of_window, now, start_of_window))
             trend = [
                 {"date": r["day"].isoformat(),
-                "total": r["total"],
-                "critical": r["critical"]}
+                 "total": r["total"],
+                 "critical": r["critical"]}
                 for r in cur.fetchall()
             ]
 
@@ -592,7 +607,7 @@ def api_dashboard():
                 LIMIT 6
             """)
             top_agents = [{"agent": r["agent"], "count": int(r["count"])}
-                        for r in cur.fetchall()]
+                          for r in cur.fetchall()]
 
             cur.execute("""
                 SELECT source_ip, count(*) AS count
@@ -605,7 +620,7 @@ def api_dashboard():
                 LIMIT 6
             """)
             top_ips = [{"ip": r["source_ip"], "count": int(r["count"])}
-                    for r in cur.fetchall()]
+                       for r in cur.fetchall()]
 
             cur.execute("""
                 SELECT id, agent, agent_ip, description, level, mitre_id,
@@ -671,7 +686,7 @@ def api_alerts():
 
 
 # ─────────────────────────────────────────────────────
-# Monitored Systems (Wazuh-backed)
+# Monitored Systems
 # ─────────────────────────────────────────────────────
 WAZUH_AGENT_GROUP_TO_TYPE = {
     "windows":    "endpoint",
@@ -837,7 +852,6 @@ def _check_db():
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT 1")
             cur.fetchone()
-
             cur.execute("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables
@@ -845,33 +859,26 @@ def _check_db():
                 ) AS has_table
             """)
             has_table = cur.fetchone()["has_table"]
-
             if not has_table:
                 elapsed = round((time.perf_counter() - started) * 1000, 1)
                 return {"name": "PostgreSQL", "status": "down",
                         "detail": "connected, but `alerts` table is missing",
                         "latency_ms": elapsed}
-
             cur.execute("""
-                SELECT count(*) AS n,
-                    min(time) AS oldest,
-                    max(time) AS newest
+                SELECT count(*) AS n, min(time) AS oldest, max(time) AS newest
                 FROM alerts
             """)
             r = cur.fetchone()
             n      = r["n"]
             oldest = r["oldest"]
             newest = r["newest"]
-
         elapsed = round((time.perf_counter() - started) * 1000, 1)
-
         detail = f"{n} rows"
         if n and newest:
             age = int((datetime.now(newest.tzinfo) - newest).total_seconds())
             detail += f" · newest {age}s ago"
         elif n == 0:
             detail += " (empty)"
-
         return {
             "name":       "PostgreSQL",
             "status":     "ok",
@@ -903,7 +910,6 @@ def _check_poller():
         return {"name": "Alert sync", "status": "degraded",
                 "detail": "no rows in alerts — poller has not written yet",
                 "last_seen": None, "stale_sec": None, "rows": 0}
-
     if newest is None:
         return {"name": "Alert sync", "status": "degraded",
                 "detail": f"{n} rows but all have NULL time",
@@ -913,16 +919,11 @@ def _check_poller():
     if age <= POLLER_STALE_SEC:
         return {"name": "Alert sync", "status": "ok",
                 "detail": f"last write {int(age)}s ago ({n} rows total)",
-                "last_seen": newest.isoformat(),
-                "stale_sec": int(age),
-                "rows": n}
-
+                "last_seen": newest.isoformat(), "stale_sec": int(age), "rows": n}
     mins = int(age // 60)
     return {"name": "Alert sync", "status": "degraded",
             "detail": f"stale — last write {mins}m ago (threshold {POLLER_STALE_SEC}s)",
-            "last_seen": newest.isoformat(),
-            "stale_sec": int(age),
-            "rows": n}
+            "last_seen": newest.isoformat(), "stale_sec": int(age), "rows": n}
 
 
 @app.route("/healthz")
@@ -957,7 +958,7 @@ def api_health():
 
 
 # ─────────────────────────────────────────────────────
-# Incident Cases (raw psycopg2)
+# Incident Cases
 # ─────────────────────────────────────────────────────
 THREAT_TO_PLAYBOOK = {
     "Brute Force":         "bruteforce",
@@ -978,8 +979,8 @@ CASE_STATUSES = {
 
 
 def _row_to_case(row):
-    """Turn a cases row (RealDictCursor) into the JSON shape the frontend wants."""
     opened = row["opened_at"]
+    mode = row["mode"] if "mode" in row.keys() else "assisted"
     return {
         "id":               row["id"],
         "caseRef":          row["case_ref"],
@@ -987,6 +988,7 @@ def _row_to_case(row):
         "severity":         row["severity"],
         "threatType":       row["threat_type"],
         "playbookKey":      row["playbook_key"],
+        "mode":             mode,
         "agent":            row["agent_name"],
         "agentIp":          row["agent_ip"],
         "sourceIp":         row["source_ip"],
@@ -1008,7 +1010,6 @@ def _row_to_case(row):
 
 
 def _next_case_ref(cur):
-    """IR-01, IR-02, ... — zero-padded, based on MAX(id)."""
     cur.execute("SELECT coalesce(max(id), 0) + 1 AS n FROM cases")
     n = cur.fetchone()["n"]
     return f"IR-{n:02d}"
@@ -1030,10 +1031,55 @@ def _case_event(cur, case_id, kind, message, actor="System"):
     )
 
 
+# ─────────────────────────────────────────────────────
+# Step action hints
+# (Not used by the simple Run flow — kept as a map of which steps
+#  could be automated if you extend it later.)
+# ─────────────────────────────────────────────────────
+_STEP_ACTIONS = {
+    ("bruteforce", 0): {
+        "action": {"name": "block_ip",       "args": {"ip": "{source_ip}"}},
+        "undo":   {"name": "unblock_ip",     "args": {"ip": "{source_ip}"}},
+        "timeout": 30,
+    },
+    ("bruteforce", 1): {
+        "action": {"name": "lock_account",   "args": {"username": "{target_user}"}},
+        "undo":   {"name": "unlock_account", "args": {"username": "{target_user}"}},
+        "timeout": 30,
+    },
+    ("bruteforce", 2): {
+        "action": {"name": "collect_auth_logs", "args": {"since_minutes": 120}},
+        "undo":   None,
+        "timeout": 60,
+    },
+    ("ransomware", 1): {
+        "action": {"name": "list_processes",   "args": {"top_n": 20}},
+        "undo":   None,
+        "timeout": 20,
+    },
+    ("ransomware", 2): {
+        "action": {"name": "list_connections", "args": {}},
+        "undo":   None,
+        "timeout": 20,
+    },
+    ("ransomware", 4): {
+        "action": {"name": "block_ip",         "args": {"ip": "{source_ip}"}},
+        "undo":   {"name": "unblock_ip",       "args": {"ip": "{source_ip}"}},
+        "timeout": 30,
+    },
+}
+
+
+def _get_step_action(playbook_key: str, step_num: int):
+    return _STEP_ACTIONS.get((playbook_key, step_num))
+
+
+# ─────────────────────────────────────────────────────
+# Incident CRUD
+# ─────────────────────────────────────────────────────
 @app.route("/api/v1/incidents", methods=["GET"])
 @login_required
 def api_incidents_list():
-    """List cases. Supports ?tab=all|active|resolved, ?q=, ?assignee=, ?type="""
     tab      = (request.args.get("tab")      or "all").lower()
     q        = (request.args.get("q")        or "").strip()
     assignee = (request.args.get("assignee") or "").strip()
@@ -1149,7 +1195,6 @@ def api_incident_get(case_id):
 @app.route("/api/v1/incidents", methods=["POST"])
 @login_required
 def api_incident_create():
-    """Create a case manually (used by 'Report New Incident' modal)."""
     body = request.get_json(silent=True) or {}
 
     threat_type = (body.get("threatType") or "").strip()
@@ -1168,6 +1213,9 @@ def api_incident_create():
     target_user = (body.get("targetUser")  or "").strip() or None
     data_cats   = (body.get("dataCategories") or "To be determined").strip()
     persons     = int(body.get("personsAffected") or 0)
+    mode        = (body.get("mode") or "assisted").lower()
+    if mode not in ("manual", "assisted"):
+        mode = "assisted"
 
     if not title:
         return jsonify({"status": "error", "error": "title is required"}), 400
@@ -1181,19 +1229,19 @@ def api_incident_create():
 
             cur.execute("""
                 INSERT INTO cases (
-                    case_ref, status, severity, threat_type, playbook_key,
+                    case_ref, status, severity, threat_type, playbook_key, mode,
                     agent_name, source_ip, target_user, title, description,
                     assigned_to, data_categories, persons_affected,
                     cur_step, total_steps
                 ) VALUES (
-                    %s, 'investigating', %s, %s, %s,
+                    %s, 'investigating', %s, %s, %s, %s,
                     %s, %s, %s, %s, %s,
                     %s, %s, %s,
                     0, %s
                 )
                 RETURNING id, case_ref, opened_at
             """, (
-                case_ref, severity, threat_type, playbook_key,
+                case_ref, severity, threat_type, playbook_key, mode,
                 agent, source_ip, target_user, title, description,
                 assigned_to, data_cats, persons,
                 total_steps,
@@ -1204,7 +1252,7 @@ def api_incident_create():
                         f"Case {case_ref} opened — {threat_type} on {agent}",
                         actor="System")
             _audit(cur, "Case opened", case_ref,
-                f"{threat_type} on {agent}", actor="System")
+                   f"{threat_type} on {agent}", actor="System")
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
@@ -1217,7 +1265,6 @@ def api_incident_create():
 @app.route("/api/v1/incidents/<int:case_id>", methods=["PATCH"])
 @login_required
 def api_incident_update(case_id):
-    """Update status / cur_step / assigned_to."""
     body = request.get_json(silent=True) or {}
     updates, params = [], []
 
@@ -1228,6 +1275,14 @@ def api_incident_update(case_id):
                             "error": f"status must be one of {sorted(CASE_STATUSES)}"}), 400
         updates.append("status = %s")
         params.append(status)
+
+    if "mode" in body:
+        mode = (body["mode"] or "").lower()
+        if mode not in ("manual", "assisted"):
+            return jsonify({"status": "error",
+                            "error": "mode must be 'manual' or 'assisted'"}), 400
+        updates.append("mode = %s")
+        params.append(mode)
 
     if "curStep" in body:
         try:
@@ -1240,6 +1295,18 @@ def api_incident_update(case_id):
     if "assignedTo" in body:
         updates.append("assigned_to = %s")
         params.append(body["assignedTo"])
+
+    if "sourceIp" in body:
+        updates.append("source_ip = %s")
+        params.append((body["sourceIp"] or "").strip() or None)
+
+    if "targetUser" in body:
+        updates.append("target_user = %s")
+        params.append((body["targetUser"] or "").strip() or None)
+
+    if "agent" in body:
+        updates.append("agent_name = %s")
+        params.append((body["agent"] or "").strip() or None)
 
     if not updates:
         return jsonify({"status": "error", "error": "no valid fields to update"}), 400
@@ -1257,24 +1324,47 @@ def api_incident_update(case_id):
             if not row:
                 return jsonify({"status": "error", "error": "case not found"}), 404
 
+            # Timeline events — one per changed field. `row` is populated
+            # now, so these read the post-update values.
             if "status" in body:
                 _case_event(cur, case_id, "status_change",
                             f"Status changed to {row['status']}", actor="System")
                 _audit(cur, "Case status changed", row["case_ref"],
-                    f"Status set to {row['status']}")
+                       f"Status set to {row['status']}")
+
+            if "mode" in body:
+                _case_event(cur, case_id, "mode_change",
+                            f"Mode changed to {row['mode']}", actor="System")
+                _audit(cur, "Case mode changed", row["case_ref"],
+                       f"Mode set to {row['mode']}")
+
             if "curStep" in body:
                 _case_event(cur, case_id, "step_change",
                             f"Step {row['cur_step']} of {row['total_steps']}")
+
+            if "assignedTo" in body:
+                _case_event(cur, case_id, "case_edit",
+                            f"Assignee set to {row['assigned_to'] or '(unassigned)'}")
+
+            if "sourceIp" in body:
+                _case_event(cur, case_id, "case_edit",
+                            f"Source IP set to {row['source_ip'] or '(cleared)'}")
+
+            if "targetUser" in body:
+                _case_event(cur, case_id, "case_edit",
+                            f"Target user set to {row['target_user'] or '(cleared)'}")
+
+            if "agent" in body:
+                _case_event(cur, case_id, "case_edit",
+                            f"Agent set to {row['agent_name'] or '(cleared)'}")
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
     return jsonify({"status": "success", "data": _row_to_case(row)})
 
-
 @app.route("/api/v1/incidents/from-alert/<int:alert_id>", methods=["POST"])
 @login_required
 def api_incident_from_alert(alert_id):
-    """One-click: turn a detection row into a case."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM alerts WHERE id = %s", (alert_id,))
@@ -1304,12 +1394,12 @@ def api_incident_from_alert(alert_id):
 
             cur.execute("""
                 INSERT INTO cases (
-                    case_ref, status, severity, threat_type, playbook_key,
+                    case_ref, status, severity, threat_type, playbook_key, mode,
                     agent_name, agent_ip, source_ip, target_user,
                     title, description, assigned_to, data_categories,
                     persons_affected, cur_step, total_steps
                 ) VALUES (
-                    %s, 'investigating', %s, %s, %s,
+                    %s, 'investigating', %s, %s, %s, 'assisted',
                     %s, %s, %s, %s,
                     %s, %s, 'IT Team', 'To be assessed',
                     0, 0, %s
@@ -1325,7 +1415,7 @@ def api_incident_from_alert(alert_id):
             _case_event(cur, new_row["id"], "opened",
                         f"Case {case_ref} opened from detection {alert_id}", actor="System")
             _audit(cur, "Case opened from detection", case_ref,
-                f"Alert #{alert_id} — {title}")
+                   f"Alert #{alert_id} — {title}")
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
@@ -1336,167 +1426,167 @@ def api_incident_from_alert(alert_id):
 
 
 # ─────────────────────────────────────────────────────
-# Playbook step definitions
+# Playbook definitions
 # ─────────────────────────────────────────────────────
 PLAYBOOKS = {
     "ransomware": {
         "name": "Ransomware Analysis & Response Guide",
         "steps": [
             {"title": "Isolate the affected system",
-            "plain": "Disconnect the affected computer from the network to stop active encryption and limit spread.",
-            "linux": "sudo iptables -I INPUT -j DROP\nsudo iptables -I OUTPUT -j DROP",
-            "windows": "netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound",
-            "expected": "The affected system can no longer communicate with the network."},
+             "plain": "Disconnect the affected computer from the network to stop active encryption and limit spread.",
+             "linux": "sudo iptables -I INPUT -j DROP\nsudo iptables -I OUTPUT -j DROP",
+             "windows": "netsh advfirewall set allprofiles firewallpolicy blockinbound,blockoutbound",
+             "expected": "The affected system can no longer communicate with the network."},
             {"title": "Identify the ransomware activity",
-            "plain": "Identify the suspicious process, executable, file extensions, and network connections associated with the ransomware.",
-            "linux": "ps aux --sort=-%cpu | head -20\nnetstat -tulnp",
-            "windows": "Get-Process | Sort-Object CPU -Descending | Select -First 20\nnetstat -ano",
-            "expected": "You have identified the suspicious process and relevant network indicators."},
+             "plain": "Identify the suspicious process, executable, file extensions, and network connections associated with the ransomware.",
+             "linux": "ps aux --sort=-%cpu | head -20\nnetstat -tulnp",
+             "windows": "Get-Process | Sort-Object CPU -Descending | Select -First 20\nnetstat -ano",
+             "expected": "You have identified the suspicious process and relevant network indicators."},
             {"title": "Preserve evidence",
-            "plain": "Capture logs, process information, network information, screenshots, and suspicious file details before removing the malware.",
-            "linux": "dmesg > /tmp/kernel_log.txt\ncp /var/log/syslog /tmp/syslog_backup.txt",
-            "windows": "Get-EventLog -LogName Security -Newest 500 | Export-Csv events.csv\nipconfig /all > network_info.txt",
-            "expected": "Evidence is stored and can be attached to the incident case."},
+             "plain": "Capture logs, process information, network information, screenshots, and suspicious file details before removing the malware.",
+             "linux": "dmesg > /tmp/kernel_log.txt\ncp /var/log/syslog /tmp/syslog_backup.txt",
+             "windows": "Get-EventLog -LogName Security -Newest 500 | Export-Csv events.csv\nipconfig /all > network_info.txt",
+             "expected": "Evidence is stored and can be attached to the incident case."},
             {"title": "Stop the malicious process",
-            "plain": "Terminate the confirmed ransomware process after evidence has been preserved.",
-            "linux": "sudo kill -9 [PID]",
-            "windows": "Stop-Process -Id [PID] -Force",
-            "expected": "The ransomware process is no longer running."},
+             "plain": "Terminate the confirmed ransomware process after evidence has been preserved.",
+             "linux": "sudo kill -9 [PID]",
+             "windows": "Stop-Process -Id [PID] -Force",
+             "expected": "The ransomware process is no longer running."},
             {"title": "Block the attacker connection",
-            "plain": "Block identified command-and-control or malicious external addresses.",
-            "linux": "sudo iptables -I OUTPUT -d [ATTACKER_IP] -j DROP",
-            "windows": 'New-NetFirewallRule -DisplayName "Block Ransomware C2" -Direction Outbound -RemoteAddress [ATTACKER_IP] -Action Block',
-            "expected": "The identified malicious connection is blocked."},
+             "plain": "Block identified command-and-control or malicious external addresses.",
+             "linux": "sudo iptables -I OUTPUT -d [ATTACKER_IP] -j DROP",
+             "windows": 'New-NetFirewallRule -DisplayName "Block Ransomware C2" -Direction Outbound -RemoteAddress [ATTACKER_IP] -Action Block',
+             "expected": "The identified malicious connection is blocked."},
             {"title": "Recover and verify",
-            "plain": "Restore affected files or systems from a known-clean backup.",
-            "linux": "rsync -av /backup/pre-attack/ /data/restored/",
-            "windows": "wbadmin start recovery -version:[BACKUP_VERSION]",
-            "expected": "Clean data is restored and the recovered system passes basic verification."},
+             "plain": "Restore affected files or systems from a known-clean backup.",
+             "linux": "rsync -av /backup/pre-attack/ /data/restored/",
+             "windows": "wbadmin start recovery -version:[BACKUP_VERSION]",
+             "expected": "Clean data is restored and the recovered system passes basic verification."},
             {"title": "Confirm clean state and close",
-            "plain": "Confirm the ransomware activity has stopped and the response record is complete before closing the incident.",
-            "linux": "# Verify services, logs, and restored files before reconnecting the host",
-            "windows": "# Verify services, logs, and restored files before reconnecting the host",
-            "expected": "The environment is stable and the incident is ready to close."},
+             "plain": "Confirm the ransomware activity has stopped and the response record is complete before closing the incident.",
+             "linux": "# Verify services, logs, and restored files before reconnecting the host",
+             "windows": "# Verify services, logs, and restored files before reconnecting the host",
+             "expected": "The environment is stable and the incident is ready to close."},
         ],
     },
     "bruteforce": {
         "name": "Brute Force Response Guide",
         "steps": [
             {"title": "Block the attacking source",
-            "plain": "Block the source address responsible for the repeated authentication attempts.",
-            "linux": "sudo iptables -I INPUT -s [ATTACKER_IP] -j DROP",
-            "windows": 'New-NetFirewallRule -DisplayName "Block Brute Force" -Direction Inbound -RemoteAddress [ATTACKER_IP] -Action Block',
-            "expected": "Further authentication attempts from the identified source are blocked."},
+             "plain": "Block the source address responsible for the repeated authentication attempts.",
+             "linux": "sudo iptables -I INPUT -s [ATTACKER_IP] -j DROP",
+             "windows": 'New-NetFirewallRule -DisplayName "Block Brute Force" -Direction Inbound -RemoteAddress [ATTACKER_IP] -Action Block',
+             "expected": "Further authentication attempts from the identified source are blocked."},
             {"title": "Protect targeted accounts",
-            "plain": "Lock accounts receiving excessive failed login attempts.",
-            "linux": "sudo passwd -l [username]",
-            "windows": "Disable-ADAccount -Identity [username]",
-            "expected": "Targeted accounts are protected from further access."},
+             "plain": "Lock accounts receiving excessive failed login attempts.",
+             "linux": "sudo passwd -l [username]",
+             "windows": "Disable-ADAccount -Identity [username]",
+             "expected": "Targeted accounts are protected from further access."},
             {"title": "Review authentication logs",
-            "plain": "Determine which accounts were targeted and whether any successful login occurred.",
-            "linux": "grep 'Failed password' /var/log/auth.log | tail -100\ngrep 'Accepted' /var/log/auth.log | tail -50",
-            "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624,4625} -MaxEvents 100',
-            "expected": "You know which accounts were targeted and whether successful authentication occurred."},
+             "plain": "Determine which accounts were targeted and whether any successful login occurred.",
+             "linux": "grep 'Failed password' /var/log/auth.log | tail -100\ngrep 'Accepted' /var/log/auth.log | tail -50",
+             "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4624,4625} -MaxEvents 100',
+             "expected": "You know which accounts were targeted and whether successful authentication occurred."},
             {"title": "Reset affected credentials",
-            "plain": "Reset credentials for accounts that were targeted or successfully accessed.",
-            "linux": "sudo passwd [username]",
-            "windows": "Set-ADAccountPassword -Identity [username] -Reset",
-            "expected": "Affected accounts have new credentials."},
+             "plain": "Reset credentials for accounts that were targeted or successfully accessed.",
+             "linux": "sudo passwd [username]",
+             "windows": "Set-ADAccountPassword -Identity [username] -Reset",
+             "expected": "Affected accounts have new credentials."},
             {"title": "Strengthen authentication controls",
-            "plain": "Review lockout and authentication controls to reduce the chance of repeated attacks.",
-            "linux": "sudo systemctl enable fail2ban --now",
-            "windows": "Set-ADDefaultDomainPasswordPolicy -LockoutThreshold 5 -LockoutDuration 00:30:00",
-            "expected": "The environment has stronger controls against repeated authentication attempts."},
+             "plain": "Review lockout and authentication controls to reduce the chance of repeated attacks.",
+             "linux": "sudo systemctl enable fail2ban --now",
+             "windows": "Set-ADDefaultDomainPasswordPolicy -LockoutThreshold 5 -LockoutDuration 00:30:00",
+             "expected": "The environment has stronger controls against repeated authentication attempts."},
             {"title": "Document and close",
-            "plain": "Record the attack source, affected accounts, successful logins, actions taken, and final outcome.",
-            "linux": "# Complete incident notes and close when verified",
-            "windows": "# Complete incident notes and close when verified",
-            "expected": "The incident has a complete response record."},
+             "plain": "Record the attack source, affected accounts, successful logins, actions taken, and final outcome.",
+             "linux": "# Complete incident notes and close when verified",
+             "windows": "# Complete incident notes and close when verified",
+             "expected": "The incident has a complete response record."},
             {"title": "Verify and close the case",
-            "plain": "Confirm repeated authentication attempts have stopped and the response record is complete.",
-            "linux": "# Review recent authentication events",
-            "windows": "# Review recent Security events",
-            "expected": "No continued brute force activity is observed and the case is ready to close."},
+             "plain": "Confirm repeated authentication attempts have stopped and the response record is complete.",
+             "linux": "# Review recent authentication events",
+             "windows": "# Review recent Security events",
+             "expected": "No continued brute force activity is observed and the case is ready to close."},
         ],
     },
     "privilege": {
         "name": "Privilege Escalation Response Guide",
         "steps": [
             {"title": "Identify the account and command",
-            "plain": "Confirm which account performed the unexpected administrative action.",
-            "linux": "last -F [username]\nhistory | tail -50",
-            "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4688} -MaxEvents 100',
-            "expected": "The account, command, time, and system are identified."},
+             "plain": "Confirm which account performed the unexpected administrative action.",
+             "linux": "last -F [username]\nhistory | tail -50",
+             "windows": 'Get-WinEvent -FilterHashtable @{LogName="Security";Id=4688} -MaxEvents 100',
+             "expected": "The account, command, time, and system are identified."},
             {"title": "Preserve relevant evidence",
-            "plain": "Save authentication, process, and system logs before changing the account.",
-            "linux": "cp /var/log/auth.log /tmp/auth_evidence.log\nps aux > /tmp/processes.txt",
-            "windows": "Get-WinEvent -LogName Security -MaxEvents 500 | Export-Csv security_events.csv",
-            "expected": "Relevant evidence is preserved."},
+             "plain": "Save authentication, process, and system logs before changing the account.",
+             "linux": "cp /var/log/auth.log /tmp/auth_evidence.log\nps aux > /tmp/processes.txt",
+             "windows": "Get-WinEvent -LogName Security -MaxEvents 500 | Export-Csv security_events.csv",
+             "expected": "Relevant evidence is preserved."},
             {"title": "Restrict suspicious access",
-            "plain": "Temporarily remove elevated access or lock the account if the activity is not authorised.",
-            "linux": "sudo passwd -l [username]",
-            "windows": "Disable-ADAccount -Identity [username]",
-            "expected": "The suspicious account can no longer perform additional privileged actions."},
+             "plain": "Temporarily remove elevated access or lock the account if the activity is not authorised.",
+             "linux": "sudo passwd -l [username]",
+             "windows": "Disable-ADAccount -Identity [username]",
+             "expected": "The suspicious account can no longer perform additional privileged actions."},
             {"title": "Check for persistence",
-            "plain": "Look for newly created admin accounts, scheduled tasks, services, startup entries.",
-            "linux": "getent group sudo\nsystemctl list-unit-files --state=enabled",
-            "windows": "Get-LocalGroupMember Administrators\nGet-ScheduledTask",
-            "expected": "No unauthorised persistence remains, or suspicious persistence is documented."},
+             "plain": "Look for newly created admin accounts, scheduled tasks, services, startup entries.",
+             "linux": "getent group sudo\nsystemctl list-unit-files --state=enabled",
+             "windows": "Get-LocalGroupMember Administrators\nGet-ScheduledTask",
+             "expected": "No unauthorised persistence remains, or suspicious persistence is documented."},
             {"title": "Restore approved privileges",
-            "plain": "Remove unauthorised privilege changes and restore the account to its approved role.",
-            "linux": "# Remove unauthorised group membership and restore approved access",
-            "windows": "# Remove unauthorised group membership and restore approved access",
-            "expected": "The account has only its approved permissions."},
+             "plain": "Remove unauthorised privilege changes and restore the account to its approved role.",
+             "linux": "# Remove unauthorised group membership and restore approved access",
+             "windows": "# Remove unauthorised group membership and restore approved access",
+             "expected": "The account has only its approved permissions."},
             {"title": "Document and close",
-            "plain": "Record the escalation path, evidence, containment actions, and final determination.",
-            "linux": "# Complete incident notes and close when verified",
-            "windows": "# Complete incident notes and close when verified",
-            "expected": "The privilege escalation incident is fully documented."},
+             "plain": "Record the escalation path, evidence, containment actions, and final determination.",
+             "linux": "# Complete incident notes and close when verified",
+             "windows": "# Complete incident notes and close when verified",
+             "expected": "The privilege escalation incident is fully documented."},
             {"title": "Verify and close the case",
-            "plain": "Confirm approved access is restored and the incident record is complete.",
-            "linux": "# Verify approved privileges",
-            "windows": "# Verify approved privileges",
-            "expected": "Approved access is confirmed and the case is ready to close."},
+             "plain": "Confirm approved access is restored and the incident record is complete.",
+             "linux": "# Verify approved privileges",
+             "windows": "# Verify approved privileges",
+             "expected": "Approved access is confirmed and the case is ready to close."},
         ],
     },
     "fileintegrity": {
         "name": "File Integrity Management Response Guide",
         "steps": [
             {"title": "Identify the changed files",
-            "plain": "Review the file integrity alert and identify which protected files changed.",
-            "linux": "stat [FILE]\nls -l [FILE]",
-            "windows": "Get-Item [FILE] | Format-List *",
-            "expected": "The changed files and timestamps are identified."},
+             "plain": "Review the file integrity alert and identify which protected files changed.",
+             "linux": "stat [FILE]\nls -l [FILE]",
+             "windows": "Get-Item [FILE] | Format-List *",
+             "expected": "The changed files and timestamps are identified."},
             {"title": "Preserve evidence",
-            "plain": "Capture the current file state, relevant logs, and the account responsible.",
-            "linux": "sha256sum [FILE] > /tmp/file_hash.txt\ncp /var/log/auth.log /tmp/auth_evidence.log",
-            "windows": "Get-FileHash [FILE] -Algorithm SHA256 | Out-File file_hash.txt",
-            "expected": "The original change and supporting evidence are recorded."},
+             "plain": "Capture the current file state, relevant logs, and the account responsible.",
+             "linux": "sha256sum [FILE] > /tmp/file_hash.txt\ncp /var/log/auth.log /tmp/auth_evidence.log",
+             "windows": "Get-FileHash [FILE] -Algorithm SHA256 | Out-File file_hash.txt",
+             "expected": "The original change and supporting evidence are recorded."},
             {"title": "Determine whether the change was authorised",
-            "plain": "Compare the change with approved maintenance, deployment, or admin activity.",
-            "linux": "# Compare timestamps with approved maintenance records",
-            "windows": "# Compare timestamps with approved maintenance records",
-            "expected": "The change is classified as authorised or suspicious."},
+             "plain": "Compare the change with approved maintenance, deployment, or admin activity.",
+             "linux": "# Compare timestamps with approved maintenance records",
+             "windows": "# Compare timestamps with approved maintenance records",
+             "expected": "The change is classified as authorised or suspicious."},
             {"title": "Contain suspicious activity",
-            "plain": "If the change is unauthorised, restrict the responsible account or process.",
-            "linux": "sudo passwd -l [username]",
-            "windows": "Disable-ADAccount -Identity [username]",
-            "expected": "Further unauthorised changes are prevented while investigation continues."},
+             "plain": "If the change is unauthorised, restrict the responsible account or process.",
+             "linux": "sudo passwd -l [username]",
+             "windows": "Disable-ADAccount -Identity [username]",
+             "expected": "Further unauthorised changes are prevented while investigation continues."},
             {"title": "Restore the approved file state",
-            "plain": "Restore the affected configuration from a known-good source.",
-            "linux": "cp /backup/approved/[FILE] [FILE]",
-            "windows": "# Restore the approved file version from your configuration backup",
-            "expected": "The protected file matches the approved configuration."},
+             "plain": "Restore the affected configuration from a known-good source.",
+             "linux": "cp /backup/approved/[FILE] [FILE]",
+             "windows": "# Restore the approved file version from your configuration backup",
+             "expected": "The protected file matches the approved configuration."},
             {"title": "Document and close",
-            "plain": "Record the changed files, authorisation decision, evidence, corrective action, and final outcome.",
-            "linux": "# Complete incident notes and close when verified",
-            "windows": "# Complete incident notes and close when verified",
-            "expected": "The file integrity incident is fully documented."},
+             "plain": "Record the changed files, authorisation decision, evidence, corrective action, and final outcome.",
+             "linux": "# Complete incident notes and close when verified",
+             "windows": "# Complete incident notes and close when verified",
+             "expected": "The file integrity incident is fully documented."},
             {"title": "Verify system stability and close",
-            "plain": "Monitor the protected files after restoration to confirm no unexpected changes recur.",
-            "linux": "# Verify file hashes and monitor for additional changes",
-            "windows": "# Verify file hashes and monitor for additional changes",
-            "expected": "The approved file state remains stable and the case is ready to close."},
+             "plain": "Monitor the protected files after restoration to confirm no unexpected changes recur.",
+             "linux": "# Verify file hashes and monitor for additional changes",
+             "windows": "# Verify file hashes and monitor for additional changes",
+             "expected": "The approved file state remains stable and the case is ready to close."},
         ],
     },
 }
@@ -1505,23 +1595,136 @@ PLAYBOOKS = {
 @app.route("/api/v1/playbooks/<key>", methods=["GET"])
 @login_required
 def api_playbook_get(key):
-    """Return the playbook step definitions for a given key."""
     pb = PLAYBOOKS.get(key)
     if not pb:
         return jsonify({"status": "error", "error": f"unknown playbook '{key}'"}), 404
     return jsonify({
-        "status":   "success",
-        "key":      key,
-        "name":     pb["name"],
-        "steps":    pb["steps"],
+        "status":     "success",
+        "key":        key,
+        "name":       pb["name"],
+        "steps":      pb["steps"],
         "totalSteps": len(pb["steps"]),
     })
+
+
+# ─────────────────────────────────────────────────────
+# Step execution — Run button on the case page
+# ─────────────────────────────────────────────────────
+@app.route("/api/v1/incidents/<int:case_id>/steps/<int:step_num>/run", methods=["POST"])
+@login_required
+def api_step_run(case_id, step_num):
+    """
+    Send the step's command (for the given platform) to the endpoint's
+    reciver.py via sender.send_command, wait for the response, and
+    return the output to the browser.
+
+    Body: {"platform": "windows" | "linux"}
+    """
+    body     = request.get_json(silent=True) or {}
+    platform = (body.get("platform") or "linux").lower()
+    if platform not in ("windows", "linux"):
+        return jsonify({"status": "error", "error": "platform must be 'windows' or 'linux'"}), 400
+
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
+            case = cur.fetchone()
+            if not case:
+                return jsonify({"status": "error", "error": "case not found"}), 404
+
+            pb = PLAYBOOKS.get(case["playbook_key"] or "")
+            if not pb or step_num < 0 or step_num >= len(pb["steps"]):
+                return jsonify({"status": "error", "error": "step not found"}), 404
+
+            step = pb["steps"][step_num]
+            command = step.get(platform) or ""
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    if not command.strip():
+        return jsonify({
+            "status": "error",
+            "error": f"step has no command for platform '{platform}'",
+        }), 400
+
+    agent_name = case["agent_name"]
+    if not agent_name:
+        return jsonify({"status": "error", "error": "case has no agent_name set"}), 400
+
+    # Look up the endpoint's IP/port from the agents table (created by 001_automation.sql)
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT ip, port FROM agents WHERE name = %s", (agent_name,))
+            row = cur.fetchone()
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    if not row or not row["ip"]:
+        return jsonify({
+            "status": "error",
+            "error": f"agent {agent_name!r} is not registered in the agents table",
+        }), 404
+
+    agent_ip   = str(row["ip"])
+    agent_port = int(row["port"] or 5055)
+
+    # Send it. send_command is synchronous — it returns when reciver.py responds.
+    try:
+        result = send_command(
+            host=agent_ip,
+            port=agent_port,
+            target_os=platform,
+            command=command,
+            timeout=65,
+        )
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "error": f"could not reach {agent_name} at {agent_ip}:{agent_port}: {e}",
+        }), 502
+
+    # Record the run in the case timeline + evidence so the DPDP report picks it up.
+    executed_by = session.get("display_name") or session.get("username") or "IT Team"
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            ok_verb = "ok" if result.get("ok") else "failed"
+            _case_event(cur, case_id, "step_run",
+                        f"Step {step_num + 1} executed on {agent_name} ({ok_verb})",
+                        actor=executed_by)
+            _audit(cur, "Step executed", case["case_ref"],
+                   f"Step {step_num + 1} on {agent_name}: "
+                   f"{(result.get('status') or ok_verb)[:200]}",
+                   actor=executed_by)
+
+            combined = result.get("stdout") or ""
+            if result.get("stderr"):
+                combined = (combined + "\n\nSTDERR:\n" + result["stderr"]).strip()
+            if combined:
+                filename = f"step{step_num + 1}_output.txt"
+                cur.execute(
+                    "INSERT INTO case_evidence (case_id, filename, kind, notes, uploaded_by) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (case_id, filename, "Agent Output", combined[:8000], executed_by),
+                )
+                _case_event(cur, case_id, "evidence",
+                            f"Evidence attached — {filename}", actor=executed_by)
+    except Exception:
+        pass   # never fail the HTTP response because of bookkeeping
+
+    return jsonify({"status": "success", "data": {
+        "ok":         bool(result.get("ok")),
+        "returncode": result.get("returncode"),
+        "stdout":     result.get("stdout") or "",
+        "stderr":     result.get("stderr") or "",
+        "agent":      agent_name,
+        "command":    command,
+        "platform":   platform,
+    }})
 
 
 @app.route("/api/v1/incidents/<int:case_id>/steps/<int:step_num>/complete", methods=["POST"])
 @login_required
 def api_step_complete(case_id, step_num):
-    """Mark step N done. Bumps cur_step, logs a case event."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
@@ -1552,12 +1755,12 @@ def api_step_complete(case_id, step_num):
             _case_event(cur, case_id, "step_done",
                         f"Step {step_num + 1} completed — {step_title}")
             _audit(cur, "Playbook step completed", case["case_ref"],
-                f"Step {step_num + 1}: {step_title}")
+                   f"Step {step_num + 1}: {step_title}")
             if new_step >= case["total_steps"]:
                 _case_event(cur, case_id, "status_change",
                             "All steps complete — case moved to Contained")
                 _audit(cur, "Playbook completed", case["case_ref"],
-                    "All response steps completed")
+                       "All response steps completed")
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -1567,7 +1770,6 @@ def api_step_complete(case_id, step_num):
 @app.route("/api/v1/incidents/<int:case_id>/steps/<int:step_num>/undo", methods=["POST"])
 @login_required
 def api_step_undo(case_id, step_num):
-    """Undo step N (only if it was the last completed one)."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
@@ -1593,7 +1795,7 @@ def api_step_undo(case_id, step_num):
             _case_event(cur, case_id, "step_undo",
                         f"Step {step_num + 1} undone — {step_title}")
             _audit(cur, "Playbook step undone", case["case_ref"],
-                f"Step {step_num + 1}")
+                   f"Step {step_num + 1}")
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
@@ -1603,7 +1805,6 @@ def api_step_undo(case_id, step_num):
 @app.route("/api/v1/incidents/<int:case_id>/evidence", methods=["POST"])
 @login_required
 def api_case_evidence_add(case_id):
-    """Attach an evidence entry. Frontend uploads only the filename (no file bytes)."""
     body = request.get_json(silent=True) or {}
     filename = (body.get("filename") or "").strip()
     if not filename:
@@ -1654,11 +1855,12 @@ def playbooks_page():
 @app.route("/api/v1/playbooks", methods=["GET"])
 @login_required
 def api_playbooks_list():
-    """List all playbooks with active-case counts."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT playbook_key,count(*) FILTER (WHERE status NOT IN ('resolved','false-positive')) AS active_count,count(*) AS total_count
+                SELECT playbook_key,
+                    count(*) FILTER (WHERE status NOT IN ('resolved','false-positive')) AS active_count,
+                    count(*) AS total_count
                 FROM cases
                 WHERE playbook_key IS NOT NULL
                 GROUP BY playbook_key
@@ -1711,6 +1913,93 @@ def _playbook_description(key):
 
 
 # ─────────────────────────────────────────────────────
+# Automation — agent inventory
+# ─────────────────────────────────────────────────────
+@app.route("/api/v1/automation/agents", methods=["GET"])
+@login_required
+def api_automation_agents():
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute(
+                "SELECT name, os, ip, port, last_seen, protected FROM agents ORDER BY name"
+            )
+            rows = cur.fetchall()
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    wazuh_status = {}
+    try:
+        wazuh = _wazuh_get("/agents", {"limit": 500})
+        for a in wazuh.get("data", {}).get("affected_items", []):
+            wazuh_status[a.get("name")] = a.get("status")
+    except Exception:
+        pass
+
+    data = []
+    for r in rows:
+        ls = r["last_seen"]
+        age = int((datetime.now(timezone.utc) - ls).total_seconds()) if ls else None
+        data.append({
+            "name":        r["name"],
+            "os":          r["os"],
+            "ip":          str(r["ip"]) if r["ip"] else None,
+            "port":        r["port"],
+            "protected":   r["protected"],
+            "lastSeen":    ls.isoformat() if ls else None,
+            "lastSeenAge": age,
+            "online":      age is not None and age < 300,
+            "wazuhStatus": wazuh_status.get(r["name"]),
+        })
+    return jsonify({"status": "success", "count": len(data), "data": data})
+
+
+@app.route("/api/v1/automation/agents/sync", methods=["POST"])
+@admin_required
+def api_automation_agents_sync():
+    try:
+        wazuh = _wazuh_get("/agents", {"limit": 500})
+    except Exception as e:
+        return jsonify({"status": "error", "error": f"Wazuh: {e}"}), 502
+
+    items = wazuh.get("data", {}).get("affected_items", [])
+    inserted = updated = 0
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            for a in items:
+                name = a.get("name")
+                ip   = a.get("ip")
+                os_platform = (a.get("os") or {}).get("platform", "").lower()
+                os_kind = "windows" if "windows" in os_platform else "linux"
+                if not name or not ip:
+                    continue
+                secret_env = "ZR_SECRET_" + name.upper().replace("-", "_")
+                cur.execute("""
+                    INSERT INTO agents (name, os, ip, port, secret_env_var)
+                    VALUES (%s, %s, %s, 5055, %s)
+                    ON CONFLICT (name) DO UPDATE
+                      SET ip = EXCLUDED.ip,
+                          os = EXCLUDED.os,
+                          updated_at = now()
+                    RETURNING (xmax = 0) AS inserted
+                """, (name, os_kind, ip, secret_env))
+                was_inserted = cur.fetchone()["inserted"]
+                if was_inserted:
+                    inserted += 1
+                else:
+                    updated += 1
+            _audit(cur, "Agents synced from Wazuh", "automation",
+                   f"inserted={inserted} updated={updated}",
+                   actor=session.get("display_name") or "System")
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+    return jsonify({
+        "status": "success",
+        "data": {"inserted": inserted, "updated": updated, "total": len(items)},
+    })
+
+
+# ─────────────────────────────────────────────────────
 # Incident Reports
 # ─────────────────────────────────────────────────────
 @app.route("/report")
@@ -1719,19 +2008,7 @@ def report_page():
     return render_template("report.html")
 
 
-def _report_snapshot(case_row, events, evidence):
-    """Build the immutable JSON payload that gets stored in reports.snapshot."""
-    c = _row_to_case(case_row)
-    return {
-        "case":      c,
-        "events":    events,
-        "evidence":  evidence,
-        "generated": datetime.now(timezone.utc).isoformat(),
-    }
-
-
 def _build_report_payload(case_id, cur):
-    """Shared logic: fetch case + events + evidence, and return a preview dict."""
     cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
     row = cur.fetchone()
     if not row:
@@ -1772,11 +2049,9 @@ def _build_report_payload(case_id, cur):
         "createdAt":  r["created_at"].isoformat(),
     } for r in cur.fetchall()]
 
-    case  = _row_to_case(row)
-    pbdef = {"key": row["playbook_key"], "name": pb["name"], "steps": pb["steps"]}
-
+    case     = _row_to_case(row)
+    pbdef    = {"key": row["playbook_key"], "name": pb["name"], "steps": pb["steps"]}
     settings = _get_settings(cur)
-
     cert_email = _compose_cert_email(case, events, settings)
 
     return {
@@ -1785,10 +2060,10 @@ def _build_report_payload(case_id, cur):
         "events":       events,
         "evidence":     evidence,
         "organisation": {
-            "name":  settings["orgName"],
-            "type":  settings["orgType"],
-            "city":  settings["city"],
-            "state": settings["state"],
+            "name":     settings["orgName"],
+            "type":     settings["orgType"],
+            "city":     settings["city"],
+            "state":    settings["state"],
             "dpoName":  settings["dpoName"],
             "dpoEmail": settings["dpoEmail"],
         },
@@ -1798,7 +2073,6 @@ def _build_report_payload(case_id, cur):
 
 
 def _compose_cert_email(case, events, settings):
-    """Plain-text CERT-In data-breach notification, DPDP Act 2023 §8(6)."""
     when    = case.get("openedAtIst") or "—"
     caseRef = case.get("caseRef")     or "—"
     agent   = case.get("agent")       or "—"
@@ -1811,8 +2085,6 @@ def _compose_cert_email(case, events, settings):
     org_state = settings.get("state")    or "Tamil Nadu"
     dpo_name  = settings.get("dpoName")  or "Data Protection Officer"
     dpo_email = settings.get("dpoEmail") or ""
-
-    steps = [e["message"] for e in events if e["kind"] == "step_done"]
 
     lines = [
         "To: incident@cert-in.org.in",
@@ -1833,6 +2105,9 @@ def _compose_cert_email(case, events, settings):
         "",
         "Response Actions Taken:",
     ]
+
+    # The simple flow writes step_run + step_done events. Both are cited.
+    steps = [e["message"] for e in events if e["kind"] in ("step_done", "step_run")]
     if steps:
         for i, s in enumerate(steps, 1):
             lines.append(f"  {i}. {s}")
@@ -1855,7 +2130,6 @@ def _compose_cert_email(case, events, settings):
 @app.route("/api/v1/reports", methods=["GET"])
 @login_required
 def api_reports_list():
-    """List previously generated reports."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
@@ -1890,23 +2164,19 @@ def api_reports_list():
 @app.route("/api/v1/reports/preview/<int:case_id>", methods=["GET"])
 @login_required
 def api_report_preview(case_id):
-    """Preview payload for the report builder — no DB write."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             payload, err = _build_report_payload(case_id, cur)
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
-
     if err:
         return jsonify({"status": "error", "error": err}), 400
-
     return jsonify({"status": "success", "data": payload})
 
 
 @app.route("/api/v1/reports", methods=["POST"])
 @login_required
 def api_report_generate():
-    """Generate and persist a report. Body: {caseId, generatedBy}."""
     body = request.get_json(silent=True) or {}
     try:
         case_id = int(body.get("caseId"))
@@ -1923,9 +2193,7 @@ def api_report_generate():
             case_ref = payload["case"]["caseRef"]
             year     = datetime.now().year
 
-            cur.execute(
-                "SELECT count(*) AS n FROM reports WHERE case_id = %s", (case_id,)
-            )
+            cur.execute("SELECT count(*) AS n FROM reports WHERE case_id = %s", (case_id,))
             seq = int(cur.fetchone()["n"]) + 1
             report_ref = f"ZR-{case_ref}-{year}-{seq:02d}"
 
@@ -1955,7 +2223,6 @@ def api_report_generate():
 @app.route("/api/v1/reports/<int:report_id>", methods=["GET"])
 @login_required
 def api_report_get(report_id):
-    """Fetch a stored report by id (full snapshot)."""
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute(
@@ -1965,10 +2232,8 @@ def api_report_get(report_id):
             r = cur.fetchone()
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
-
     if not r:
         return jsonify({"status": "error", "error": "report not found"}), 404
-
     return jsonify({"status": "success", "data": {
         "id":         r["id"],
         "reportRef":  r["report_ref"],
@@ -2127,9 +2392,7 @@ def api_analysis():
     for key, label in THREAT_LABELS.items():
         n = cat_counts[key]
         pct = round((n / total_alerts) * 100) if total_alerts else 0
-        top_agents = sorted(
-            cat_agents[key].items(), key=lambda kv: kv[1], reverse=True
-        )[:3]
+        top_agents = sorted(cat_agents[key].items(), key=lambda kv: kv[1], reverse=True)[:3]
         cards.append({
             "key":       key,
             "label":     label,
@@ -2140,13 +2403,8 @@ def api_analysis():
 
     trend = [{"date": d.isoformat(), **trend_map[d]} for d in day_labels]
 
-    targets = sorted(
-        agent_breakdown.items(), key=lambda kv: sum(kv[1].values()), reverse=True
-    )[:6]
-    targets_out = [
-        {"agent": a, "count": sum(b.values()), "breakdown": b}
-        for a, b in targets
-    ]
+    targets = sorted(agent_breakdown.items(), key=lambda kv: sum(kv[1].values()), reverse=True)[:6]
+    targets_out = [{"agent": a, "count": sum(b.values()), "breakdown": b} for a, b in targets]
 
     return jsonify({
         "status":      "success",
@@ -2163,7 +2421,7 @@ def api_analysis():
 
 
 # ─────────────────────────────────────────────────────
-# Statistics / Metrics
+# Metrics
 # ─────────────────────────────────────────────────────
 @app.route("/metrics")
 @login_required
@@ -2182,16 +2440,14 @@ def api_metrics():
     try:
         with get_conn() as conn, conn.cursor() as cur:
             cur.execute("""
-                SELECT
-                    count(*) AS total,
+                SELECT count(*) AS total,
                     count(*) FILTER (WHERE time > now() - interval '24 hours') AS last24h
                 FROM alerts
             """)
             alert_stats = dict(cur.fetchone())
 
             cur.execute("""
-                SELECT
-                    count(*) AS total,
+                SELECT count(*) AS total,
                     count(*) FILTER (WHERE status NOT IN ('resolved','false-positive')) AS open,
                     count(*) FILTER (WHERE status = 'resolved') AS resolved
                 FROM cases
@@ -2255,11 +2511,7 @@ def api_metrics():
         d = (now - timedelta(days=29 - i)).date()
         mttd = round(6.1 - i * 0.06, 1)
         mttr = round(35.0 - i * 0.43, 1)
-        trend_30.append({
-            "date":        d.isoformat(),
-            "mttdMinutes": mttd,
-            "mttrMinutes": mttr,
-        })
+        trend_30.append({"date": d.isoformat(), "mttdMinutes": mttd, "mttrMinutes": mttr})
 
     fpr_30 = []
     for i in range(30):
@@ -2292,7 +2544,7 @@ def api_metrics():
             "fpr30":             fpr_30,
         },
         "disclaimer": "MTTD, MTTR, false-positive rate, and monthly history are demo placeholders. "
-                    "Real alert counts, cases, and reports come from the live database.",
+                      "Real alert counts, cases, and reports come from the live database.",
     })
 
 
@@ -2307,7 +2559,6 @@ SETTINGS_FIELDS = (
 
 
 def _get_settings(cur):
-    """Always returns a dict — row is guaranteed by the schema seed."""
     cur.execute("SELECT * FROM settings WHERE id = 1")
     row = cur.fetchone()
     if not row:
@@ -2348,7 +2599,6 @@ def api_settings_get():
 @admin_required
 def api_settings_update():
     body = request.get_json(silent=True) or {}
-
     updates, params = [], []
     mapping = {
         "orgName":    "org_name",
@@ -2373,13 +2623,10 @@ def api_settings_update():
 
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE settings SET {', '.join(updates)} WHERE id = 1",
-                params,
-            )
+            cur.execute(f"UPDATE settings SET {', '.join(updates)} WHERE id = 1", params)
             _audit(cur, "Settings updated", "Settings",
-                ", ".join(mapping[k] for k in body if k in mapping),
-                actor="Administrator")
+                   ", ".join(mapping[k] for k in body if k in mapping),
+                   actor="Administrator")
             s = _get_settings(cur)
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
@@ -2449,7 +2696,7 @@ def api_users_create():
             )
             new = cur.fetchone()
             _audit(cur, "User created", new["username"],
-                f"Role: {new['role']}", actor=session["display_name"])
+                   f"Role: {new['role']}", actor=session["display_name"])
     except psycopg2.errors.UniqueViolation:
         return jsonify({"status": "error", "error": f"username '{username}' already exists"}), 409
     except Exception as e:
@@ -2491,16 +2738,13 @@ def api_users_update(user_id):
     params.append(user_id)
     try:
         with get_conn() as conn, conn.cursor() as cur:
-            cur.execute(
-                f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING *",
-                params,
-            )
+            cur.execute(f"UPDATE users SET {', '.join(updates)} WHERE id = %s RETURNING *", params)
             row = cur.fetchone()
             if not row:
                 return jsonify({"status": "error", "error": "user not found"}), 404
             _audit(cur, "User updated", row["username"],
-                ", ".join(f"{k}={v}" for k, v in body.items()),
-                actor=session["display_name"])
+                   ", ".join(f"{k}={v}" for k, v in body.items()),
+                   actor=session["display_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
