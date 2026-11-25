@@ -978,6 +978,15 @@ CASE_STATUSES = {
 }
 
 
+def _lookup_agent_os(cur, agent_name):
+    """Return "windows" | "linux" for the agent, or None if unknown."""
+    if not agent_name:
+        return None
+    cur.execute("SELECT os FROM agents WHERE name = %s", (agent_name,))
+    r = cur.fetchone()
+    return r["os"] if r else None
+
+
 def _row_to_case(row):
     opened = row["opened_at"]
     mode = row["mode"] if "mode" in row.keys() else "assisted"
@@ -1127,10 +1136,21 @@ def api_incidents_list():
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
+    data = [_row_to_case(r) for r in rows]
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT name, os FROM agents")
+            os_by_name = {r["name"]: r["os"] for r in cur.fetchall()}
+        for c in data:
+            c["agentOs"] = os_by_name.get(c["agent"])
+    except Exception:
+        for c in data:
+            c["agentOs"] = None
+
     return jsonify({
         "status": "success",
-        "count":  len(rows),
-        "data":   [_row_to_case(r) for r in rows],
+        "count":  len(data),
+        "data":   data,
     })
 
 
@@ -1172,12 +1192,15 @@ def api_incident_get(case_id):
                 "uploadedBy": r["uploaded_by"],
                 "createdAt":  r["created_at"].isoformat(),
             } for r in cur.fetchall()]
+
+            agent_os = _lookup_agent_os(cur, row["agent_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
     case = _row_to_case(row)
     case["events"]   = events
     case["evidence"] = evidence
+    case["agentOs"]  = agent_os      # "windows" | "linux" | None
 
     pb = PLAYBOOKS.get(row["playbook_key"] or "")
     if pb:
@@ -1256,10 +1279,13 @@ def api_incident_create():
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
+            agent_os = _lookup_agent_os(cur, full["agent_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-    return jsonify({"status": "success", "data": _row_to_case(full)}), 201
+    data = _row_to_case(full)
+    data["agentOs"] = agent_os
+    return jsonify({"status": "success", "data": data}), 201
 
 
 @app.route("/api/v1/incidents/<int:case_id>", methods=["PATCH"])
@@ -1357,10 +1383,14 @@ def api_incident_update(case_id):
             if "agent" in body:
                 _case_event(cur, case_id, "case_edit",
                             f"Agent set to {row['agent_name'] or '(cleared)'}")
+
+            agent_os = _lookup_agent_os(cur, row["agent_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-    return jsonify({"status": "success", "data": _row_to_case(row)})
+    data = _row_to_case(row)
+    data["agentOs"] = agent_os
+    return jsonify({"status": "success", "data": data})
 
 @app.route("/api/v1/incidents/from-alert/<int:alert_id>", methods=["POST"])
 @login_required
@@ -1419,10 +1449,13 @@ def api_incident_from_alert(alert_id):
 
             cur.execute("SELECT * FROM cases WHERE id = %s", (new_row["id"],))
             full = cur.fetchone()
+            agent_os = _lookup_agent_os(cur, full["agent_name"])
     except Exception as e:
         return jsonify({"status": "error", "error": str(e)}), 500
 
-    return jsonify({"status": "success", "data": _row_to_case(full)}), 201
+    data = _row_to_case(full)
+    data["agentOs"] = agent_os
+    return jsonify({"status": "success", "data": data}), 201
 
 
 # ─────────────────────────────────────────────────────
@@ -2749,6 +2782,107 @@ def api_users_update(user_id):
         return jsonify({"status": "error", "error": str(e)}), 500
 
     return jsonify({"status": "success"})
+
+
+# ─────────────────────────────────────────────────────
+# Background agent inventory sync (Wazuh -> agents table)
+# ─────────────────────────────────────────────────────
+import threading as _agent_sync_threading
+
+_AGENT_SYNC_INTERVAL_SEC = int(os.getenv("AGENT_SYNC_INTERVAL_SEC", "300"))
+
+
+def _sync_agents_once() -> None:
+    """Upsert name/os/ip from Wazuh. Never touches secret_env_var, port or protected on existing rows."""
+    try:
+        wazuh = _wazuh_get("/agents", {"limit": 500})
+    except Exception as e:
+        print(f"[agents-sync] Wazuh unreachable: {e}")
+        return
+
+    items = wazuh.get("data", {}).get("affected_items", [])
+    inserted = updated = 0
+    try:
+        with get_conn() as conn, conn.cursor() as cur:
+            for a in items:
+                name = a.get("name")
+                ip   = a.get("ip")
+                os_platform = ((a.get("os") or {}).get("platform") or "").lower()
+                os_kind = "windows" if "windows" in os_platform else "linux"
+                if not name or not ip:
+                    continue
+                secret_env = "ZR_SECRET_" + name.upper().replace("-", "_")
+                cur.execute("""
+                    INSERT INTO agents (name, os, ip, port, secret_env_var)
+                    VALUES (%s, %s, %s, 5055, %s)
+                    ON CONFLICT (name) DO UPDATE
+                      SET ip = EXCLUDED.ip, os = EXCLUDED.os, updated_at = now()
+                    RETURNING (xmax = 0) AS inserted
+                """, (name, os_kind, ip, secret_env))
+                if cur.fetchone()["inserted"]:
+                    inserted += 1
+                else:
+                    updated += 1
+    except Exception as e:
+        print(f"[agents-sync] DB error: {e}")
+        return
+
+    print(f"[agents-sync] {inserted} inserted, {updated} updated")
+
+
+def _agent_sync_loop() -> None:
+    """Run once shortly after startup, then every AGENT_SYNC_INTERVAL_SEC."""
+    if os.getenv("AGENT_SYNC_DISABLED") == "1":
+        print("[agents-sync] disabled via AGENT_SYNC_DISABLED=1")
+        return
+    time.sleep(5)
+    while True:
+        try:
+            _sync_agents_once()
+        except Exception as e:
+            print(f"[agents-sync] unexpected: {e}")
+        time.sleep(_AGENT_SYNC_INTERVAL_SEC)
+
+
+def _start_agent_sync_thread() -> None:
+    _agent_sync_threading.Thread(
+        target=_agent_sync_loop, daemon=True, name="agents-sync"
+    ).start()
+
+@app.route("/api/v1/incidents/<int:case_id>/steps/<int:step_num>/preview", methods=["GET"])
+@login_required
+def api_step_preview(case_id, step_num):
+    platform = (request.args.get("platform") or "linux").lower()
+    if platform not in ("windows", "linux"):
+        return jsonify({"status": "error", "error": "platform must be 'windows' or 'linux'"}), 400
+
+    with get_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT * FROM cases WHERE id = %s", (case_id,))
+        case = cur.fetchone()
+        if not case:
+            return jsonify({"status": "error", "error": "case not found"}), 404
+
+    pb = PLAYBOOKS.get(case["playbook_key"] or "")
+    if not pb or step_num < 0 or step_num >= len(pb["steps"]):
+        return jsonify({"status": "error", "error": "step not found"}), 404
+
+    raw_cmd = pb["steps"][step_num].get(platform) or ""
+    cmd = (
+        raw_cmd
+        .replace("[ATTACKER_IP]", case["source_ip"] or "[ATTACKER_IP]")
+        .replace("[username]", case["target_user"] or "[username]")
+    )
+    return jsonify({
+        "status": "success",
+        "data": {
+            "platform": platform,
+            "command": cmd,
+            "agent": case["agent_name"],
+            "mode": case["mode"] if "mode" in case.keys() else "assisted",
+        },
+    })
+# Module level (not under __main__) so it also runs under gunicorn/Docker.
+_start_agent_sync_thread()
 
 
 # ─────────────────────────────────────────────────────

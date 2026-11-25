@@ -182,6 +182,7 @@
     <div class="sb-section-label">Investigate</div>
     <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
     <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
+    <a class="nav-item" href="/vulnerabilities"><span class="nav-icon"><i data-lucide="shield-alert" class="ui-icon"></i></span>Vulnerabilities</a>
 
     <div class="sb-section-label">Report</div>
     <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
@@ -557,31 +558,22 @@ function renderTerminalSection(i, step) {
   const state = RUN_STATES[i] || {};
   const isActive = i === CASE.curStep;
   const isDone = i < CASE.curStep;
-  // Manual mode disables automation completely
   const automation = !!state.automation && (CASE.mode !== 'manual');
   const runStatus = state.status;
 
   const cmd = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
 
-  // Prompt line (what the agent will/would run)
-    let promptLine = '';
+  let promptLine = '';
   if (automation) {
-    if (state.guardOk === false) {
-      // Don't show template placeholders as if they were real args
-      promptLine = `${state.action || 'action'} — blocked (see banner)`;
-    } else {
-      const argStr = Object.entries(state.args || {}).map(([k, v]) => `${k}=${v}`).join(' ');
-      promptLine = `${state.action}${argStr ? ' ' + argStr : ''}`;
-    }
+    const firstLine = (cmd || '').split('\n')[0].trim();
+    promptLine = firstLine || `${state.action || 'command'}`;
   } else {
     promptLine = 'manual — copy the command below';
   }
 
-  // Connection dot
   const connCls = AGENT_ONLINE === true ? 'online' : AGENT_ONLINE === false ? 'offline' : 'unknown';
   const connText = AGENT_ONLINE === true ? 'connected' : AGENT_ONLINE === false ? 'unreachable' : 'unknown';
 
-  // Body content
   let bodyText = '';
   let bodyEmpty = 'Click "Run" to execute on the agent.';
   if (!automation) {
@@ -591,6 +583,7 @@ function renderTerminalSection(i, step) {
     bodyText = cmd || '';
   } else if (runStatus === 'running' || runStatus === 'queued') {
     bodyEmpty = 'Running on agent…';
+    bodyText = cmd || '';
   } else if (runStatus === 'done' && state.result) {
     bodyEmpty = '';
     bodyText = state.result.stdout || '';
@@ -608,8 +601,9 @@ function renderTerminalSection(i, step) {
     }
     if (!bodyText && state.error) bodyText = state.error;
     if (!bodyText) bodyText = '(failed with no output)';
+  } else {
+    bodyText = cmd || '';
   }
-
   // Footer status
   let footLine = '';
   if (automation) {
@@ -937,43 +931,18 @@ async function saveCaseDetails() {
 
 // ── preview / run / poll ─────────────────────────────
 async function loadPreview(i) {
-  try {
-    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/preview`, { cache: 'no-store' });
-    const body = await r.json();
-    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
-    const d = body.data;
-    if (!d.automation) {
-      RUN_STATES[i] = { ...(RUN_STATES[i] || {}), automation: false };
-    } else {
-      RUN_STATES[i] = {
-        ...(RUN_STATES[i] || {}),
-        automation: true,
-        action:    d.action,
-        args:      d.args || {},
-        undo:      d.undo,
-        undoArgs:  d.undoArgs,
-        timeout:   d.timeout,
-        guardOk:   d.guardOk,
-        guardReason: d.guardReason,
-        agent:     d.agent,
-        latestRun: d.latestRun,
-        status:    d.latestRun ? d.latestRun.status : null,
-        result:    d.latestRun ? d.latestRun.resultJson : null,
-        error:     d.latestRun ? d.latestRun.error : null,
-      };
-      if (d.latestRun && (d.latestRun.status === 'queued' || d.latestRun.status === 'running')) {
-        RUN_STATES[i].runId = d.latestRun.id;
-        resumePolling(i);
-      }
-      // Seed AGENT_ONLINE from a lightweight status call — reuses the ping
-      // the status endpoint already does, and avoids the "unknown" dot
-      // before the user's first click.
-      seedAgentOnline(i);
-    }
-    rerenderStepBody(i);
-  } catch (err) {
-    console.error('preview failed', i, err);
-  }
+  const step = CASE && CASE.playbook && CASE.playbook.steps[i];
+  const cmd = step ? (CUR_PLATFORM === 'linux' ? step.linux : step.windows) : '';
+  const hasCmd = !!(cmd && cmd.trim());
+  RUN_STATES[i] = {
+    ...(RUN_STATES[i] || {}),
+    automation: hasCmd,
+    action: hasCmd ? `exec_${CUR_PLATFORM}` : null,
+    args: {},
+    guardOk: hasCmd ? true : undefined,
+    agent: CASE ? CASE.agent : null,
+  };
+  rerenderStepBody(i);
 }
 
 async function seedAgentOnline(i) {
@@ -990,21 +959,19 @@ async function seedAgentOnline(i) {
 
 async function runStep(i, isUndo) {
   const state = RUN_STATES[i] || {};
-  if (state.status === 'running' || state.status === 'queued') return;
-  const actionLabel = isUndo ? state.undo : state.action;
-  const argsLabel   = isUndo ? state.undoArgs : state.args;
-  if (!actionLabel) { alert('No automated action available for this step.'); return; }
-  if (!isUndo && state.guardOk === false) {
-    alert('Cannot run: ' + (state.guardReason || 'guard check failed'));
+  if (state.status === 'running') return;
+  const step = CASE.playbook.steps[i];
+  const cmd = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
+  if (!cmd || !cmd.trim()) {
+    alert(`No ${CUR_PLATFORM} command for this step.`);
     return;
   }
-  const confirmMsg =
-    `Run "${actionLabel}" on ${state.agent || CASE.agent || 'agent'}?\n\n` +
-    `Args: ${JSON.stringify(argsLabel || {})}\n\n` +
-    (isUndo ? '' : `Undo available: ${state.undo || 'none'}\n\n`) +
-    'The click is the approval. Continue?';
-  if (!confirm(confirmMsg)) return;
 
+  const confirmMsg =
+    `Run ${CUR_PLATFORM} command on ${CASE.agent || 'agent'}?\n\n` +
+    `${cmd}\n\n` +
+    `The click is the approval. Continue?`;
+  if (!confirm(confirmMsg)) return;
   RUN_STATES[i] = { ...state, status: 'running', runId: null, result: null, error: null };
   rerenderStepBody(i);
 
