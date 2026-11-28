@@ -256,7 +256,9 @@
 
 <script>
 function refreshIcons(root = document) {
-  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+  if (!window.lucide || !lucide.createIcons) return;
+  const target = root && typeof root.querySelectorAll === 'function' ? root : document;
+  lucide.createIcons({ root: target, attrs: { 'stroke-width': 1.9 } });
 }
 document.addEventListener('DOMContentLoaded', refreshIcons);
 

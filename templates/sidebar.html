@@ -1,0 +1,57 @@
+<nav id="sidebar">
+  <div class="sb-logo">
+    <div class="sb-logo-text">Zero<span>Respond</span></div>
+    <div class="sb-logo-sub">Incident Response Platform</div>
+  </div>
+  <div class="sb-nav">
+    <div class="sb-section-label">Monitor</div>
+    <a class="nav-item {% if active_page == 'dashboard' %}active{% endif %}" href="/">
+      <span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard
+    </a>
+    <a class="nav-item {% if active_page == 'alerts' %}active{% endif %}" href="/alerts">
+      <span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed
+    </a>
+    <a class="nav-item {% if active_page == 'systems' %}active{% endif %}" href="/systems">
+      <span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems
+    </a>
+
+    <div class="sb-section-label">Respond</div>
+    <a class="nav-item {% if active_page == 'incidents' %}active{% endif %}" href="/incidents">
+      <span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases
+    </a>
+    <a class="nav-item {% if active_page == 'playbooks' %}active{% endif %}" href="/playbooks">
+      <span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks
+    </a>
+
+    <div class="sb-section-label">Investigate</div>
+    <a class="nav-item {% if active_page == 'analysis' %}active{% endif %}" href="/analysis">
+      <span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis
+    </a>
+    <a class="nav-item {% if active_page == 'metrics' %}active{% endif %}" href="/metrics">
+      <span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics
+    </a>
+    <a class="nav-item {% if active_page == 'vulnerabilities' %}active{% endif %}" href="/vulnerabilities">
+      <span class="nav-icon"><i data-lucide="shield-alert" class="ui-icon"></i></span>Vulnerabilities
+    </a>
+
+    <div class="sb-section-label">Report</div>
+    <a class="nav-item {% if active_page == 'report' %}active{% endif %}" href="/report">
+      <span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports
+    </a>
+    <a class="nav-item {% if active_page == 'audit' %}active{% endif %}" href="/audit">
+      <span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log
+    </a>
+
+    <div class="sb-section-label">System</div>
+    <a class="nav-item {% if active_page == 'health' %}active{% endif %}" href="/health">
+      <span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health
+    </a>
+    <a class="nav-item {% if active_page == 'settings' %}active{% endif %}" href="/settings">
+      <span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings
+    </a>
+  </div>
+  <div class="sb-footer">
+    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
+    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
+  </div>
+</nav>

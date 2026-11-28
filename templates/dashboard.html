@@ -14,40 +14,8 @@
 </head>
 <body>
 
-<!-- ══════ SIDEBAR ══════ -->
-<nav id="sidebar">
-  <div class="sb-logo">
-    <div class="sb-logo-text">Zero<span>Respond</span></div>
-    <div class="sb-logo-sub">Incident Response Platform</div>
-  </div>
-  <div class="sb-nav">
-    <div class="sb-section-label">Monitor</div>
-    <a class="nav-item active" href="/"><span class="nav-icon"><i data-lucide="layout-dashboard" class="ui-icon"></i></span>Dashboard</a>
-    <a class="nav-item" href="/alerts"><span class="nav-icon"><i data-lucide="bell" class="ui-icon"></i></span>Detection Feed</a>
-    <a class="nav-item" href="/systems"><span class="nav-icon"><i data-lucide="monitor" class="ui-icon"></i></span>Monitored Systems</a>
-
-    <div class="sb-section-label">Respond</div>
-    <a class="nav-item" href="/incidents"><span class="nav-icon"><i data-lucide="clipboard-list" class="ui-icon"></i></span>Incident Cases</a>
-    <a class="nav-item" href="/playbooks"><span class="nav-icon"><i data-lucide="list-checks" class="ui-icon"></i></span>Playbooks</a>
-    <div class="sb-section-label">Investigate</div>
-    <a class="nav-item" href="/analysis"><span class="nav-icon"><i data-lucide="bar-chart-3" class="ui-icon"></i></span>Attack Analysis</a>
-    <a class="nav-item" href="/metrics"><span class="nav-icon"><i data-lucide="trending-up" class="ui-icon"></i></span>Statistics</a>
-    <a class="nav-item" href="/vulnerabilities"><span class="nav-icon"><i data-lucide="shield-alert" class="ui-icon"></i></span>Vulnerabilities</a>
-    <div class="sb-section-label">Report</div>
-    <a class="nav-item" href="/report"><span class="nav-icon"><i data-lucide="file-chart-column" class="ui-icon"></i></span>Incident Reports</a>
-    <a class="nav-item" href="/audit"><span class="nav-icon"><i data-lucide="scroll-text" class="ui-icon"></i></span>Audit Log</a>
-
-    <div class="sb-section-label">System</div>
-    <a class="nav-item" href="/health"><span class="nav-icon"><i data-lucide="activity" class="ui-icon"></i></span>API Health</a>
-        <a class="nav-item" href="/settings"><span class="nav-icon"><i data-lucide="settings" class="ui-icon"></i></span>Settings</a>
-
-  </div>
-
-  <div class="sb-footer">
-    <div class="sb-org"><i data-lucide="landmark" class="ui-icon"></i> Kumaraguru College of Technology</div>
-    <div class="sb-compliance"><i data-lucide="circle-check" class="ui-icon"></i> DPDP Act / CERT-In support</div>
-  </div>
-</nav>
+{% set active_page = 'dashboard' %}
+{% include 'sidebar.html' %}
 
 <!-- ══════ TOPBAR ══════ -->
 <header id="topbar">
@@ -194,9 +162,10 @@
 </main>
 
 <script>
-// ── Icons + clock ─────────────────────────────────────
 function refreshIcons(root = document) {
-  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+  if (!window.lucide || !lucide.createIcons) return;
+  const target = root && typeof root.querySelectorAll === 'function' ? root : document;
+  lucide.createIcons({ root: target, attrs: { 'stroke-width': 1.9 } });
 }
 document.addEventListener('DOMContentLoaded', refreshIcons);
 
