@@ -1,0 +1,310 @@
+// ── Icons ─────────────────────────────────────────────
+function refreshIcons(root = document) {
+  if (window.lucide && lucide.createIcons) lucide.createIcons({ root, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', () => refreshIcons());
+
+// ── Clock ─────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── Constants ─────────────────────────────────────────
+const CAT_INFO = {
+  bf:  { label: '<i data-lucide="key-round" class="ui-icon"></i> Brute Force',         cls: 'bf'  },
+  pe:  { label: '<i data-lucide="arrow-up" class="ui-icon"></i> Privilege Escalation', cls: 'pe'  },
+  fim: { label: '<i data-lucide="folder" class="ui-icon"></i> File Integrity',         cls: 'fim' },
+  ra:  { label: '<i data-lucide="lock" class="ui-icon"></i> Ransomware',               cls: 'ra'  },
+};
+const SEV_LBL = {
+  critical: '<i data-lucide="triangle-alert" class="ui-icon"></i> Urgent',
+  high:     'High',
+  medium:   'Medium',
+  low:      'Low',
+};
+const SEV_DESC = {
+  critical: 'This is a high-priority warning. If not handled quickly, the attacker could cause significant damage.',
+  high:     'This warning needs attention soon. Delaying your response could allow the situation to worsen.',
+  medium:   'Moderate concern worth investigating. Not an emergency, but should be reviewed within a few hours.',
+  low:      'Low-priority notice. Worth reviewing when time allows — may be normal activity.',
+};
+
+// Preset -> ISO duration in minutes (rolling windows only; "today" and "custom" are handled separately)
+const RANGE_MINUTES = {
+  '12h': 12 * 60,
+  '24h': 24 * 60,
+  '3d' : 3  * 24 * 60,
+  '7d' : 7  * 24 * 60,
+  '15d': 15 * 24 * 60,
+  '30d': 30 * 24 * 60,
+  '90d': 90 * 24 * 60,
+};
+const RANGE_LABEL = {
+  'today': 'Today',
+  '12h': 'Last 12 hours',
+  '24h': 'Last 24 hours',
+  '3d' : 'Last 3 days',
+  '7d' : 'Last 7 days',
+  '15d': 'Last 15 days',
+  '30d': 'Last 30 days',
+  '90d': 'Last 90 days',
+  'custom': 'Custom range',
+};
+
+// ── Range helpers ─────────────────────────────────────
+function onRangeChange() {
+  const val = document.getElementById('f-range').value;
+  const panel = document.getElementById('custom-range-panel');
+  if (val === 'custom') {
+    panel.style.display = 'block';
+    // Prefill From = now-24h, To = now (if blank)
+    const fromEl = document.getElementById('f-from');
+    const toEl   = document.getElementById('f-to');
+    if (!fromEl.value) {
+      const now = new Date();
+      const dayAgo = new Date(now.getTime() - 24 * 3600 * 1000);
+      fromEl.value = toLocalInputValue(dayAgo);
+      toEl.value   = toLocalInputValue(now);
+    }
+  } else {
+    panel.style.display = 'none';
+    loadFeed();
+  }
+}
+
+function toLocalInputValue(d) {
+  // datetime-local wants "YYYY-MM-DDTHH:mm" in *local* time
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+function applyCustomRange() {
+  const fromVal = document.getElementById('f-from').value;
+  const toVal   = document.getElementById('f-to').value;
+  if (!fromVal || !toVal) {
+    alert('Please pick both a From and a To date.');
+    return;
+  }
+  const from = new Date(fromVal);
+  const to   = new Date(toVal);
+  if (isNaN(from) || isNaN(to)) {
+    alert('Invalid date. Please re-pick.');
+    return;
+  }
+  if (from >= to) {
+    alert('"From" must be earlier than "To".');
+    return;
+  }
+  loadFeed();
+}
+
+function resetRange() {
+  document.getElementById('f-range').value = 'today';
+  document.getElementById('custom-range-panel').style.display = 'none';
+  document.getElementById('f-from').value = '';
+  document.getElementById('f-to').value = '';
+  loadFeed();
+}
+
+// Build from/to ISO params based on current selection
+function buildTimeParams() {
+  const mode = document.getElementById('f-range').value;
+  const now  = new Date();
+
+  // Custom range -> user-picked datetimes (local -> UTC via toISOString)
+  if (mode === 'custom') {
+    const fromVal = document.getElementById('f-from').value;
+    const toVal   = document.getElementById('f-to').value;
+    const out = {};
+    if (fromVal) out.from = new Date(fromVal).toISOString();
+    if (toVal)   out.to   = new Date(toVal).toISOString();
+    return out;
+  }
+
+  // "Today" -> local midnight (browser timezone) up to now
+  if (mode === 'today') {
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+    return { from: midnight.toISOString(), to: now.toISOString() };
+  }
+
+  // Rolling windows
+  const mins = RANGE_MINUTES[mode];
+  if (!mins) return {};
+  const from = new Date(now.getTime() - mins * 60 * 1000);
+  return { from: from.toISOString(), to: now.toISOString() };
+}
+
+// Human summary shown under the filters
+function renderRangeSummary(fromIso, toIso) {
+  const el = document.getElementById('range-summary');
+  if (!el) return;
+  if (!fromIso && !toIso) { el.textContent = ''; return; }
+  const fmt = iso => iso
+    ? new Date(iso).toLocaleString('en-IN', {
+        timeZone: 'Asia/Kolkata',
+        day: '2-digit', month: 'short', year: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      }) + ' IST'
+    : '—';
+  el.innerHTML =
+    '<i data-lucide="calendar-clock" class="ui-icon"></i> ' +
+    'Showing <strong>' + fmt(fromIso) + '</strong> → <strong>' + fmt(toIso) + '</strong>';
+  refreshIcons(el);
+}
+
+// ── Status pill ───────────────────────────────────────
+function setStatus(kind, text) {
+  const el = document.getElementById('feed-status');
+  if (!el) return;
+  el.className = 'status-pill ' + kind;
+  el.innerHTML = '<span class="dot"></span>' + text;
+}
+
+function setRefreshBusy(busy) {
+  const btn = document.getElementById('refresh-btn');
+  if (!btn) return;
+  btn.disabled = !!busy;
+  btn.innerHTML = busy
+    ? '<span class="spin" style="margin-right:6px"></span>Loading…'
+    : '<i data-lucide="refresh-cw" class="ui-icon"></i> Refresh';
+  refreshIcons(btn);
+}
+
+// ── Fetch & render ────────────────────────────────────
+let _debounceTimer = null;
+
+function debouncedLoad() {
+  clearTimeout(_debounceTimer);
+  _debounceTimer = setTimeout(loadFeed, 300);
+}
+
+async function loadFeed() {
+  const sev = document.getElementById('f-sev').value;
+  const cat = document.getElementById('f-cat').value;
+  const q   = document.getElementById('f-search').value.trim();
+  const t   = buildTimeParams();
+
+  const params = new URLSearchParams();
+  if (sev)     params.set('sev', sev);
+  if (cat)     params.set('category', cat);
+  if (q)       params.set('q', q);
+  if (t.from)  params.set('from', t.from);
+  if (t.to)    params.set('to', t.to);
+
+  setStatus('loading', 'Loading');
+  setRefreshBusy(true);
+  renderRangeSummary(t.from, t.to);
+
+  try {
+    const res  = await fetch('/api/v1/alerts/feed?' + params.toString(), { cache: 'no-store' });
+    const body = await res.json();
+    if (!res.ok || body.status !== 'success') {
+      throw new Error(body.error || 'Failed to load');
+    }
+
+    const n = body.count || 0;
+    setStatus('ready', `${n} alert${n === 1 ? '' : 's'}`);
+    renderFeed(body.data, n);
+  } catch (err) {
+    setStatus('error', 'Fetch error');
+    document.getElementById('alert-feed').innerHTML = `
+      <div style="padding:40px;text-align:center;color:var(--c-critical)">
+        <i data-lucide="circle-x" class="ui-icon" style="width:32px;height:32px"></i>
+        <div style="margin-top:10px;font-weight:700;font-size:15px">Could not load alerts</div>
+        <div style="font-size:13px;color:var(--text-3);margin-top:6px">${escapeHtml(err.message)}</div>
+        <div style="font-size:12.5px;color:var(--text-3);margin-top:12px">
+          Check <a href="/health" style="color:var(--accent)">/health</a> to see which service is down.
+        </div>
+      </div>`;
+    refreshIcons(document.getElementById('alert-feed'));
+  } finally {
+    setRefreshBusy(false);
+  }
+}
+
+function renderFeed(data, totalCount) {
+  const feedEl = document.getElementById('alert-feed');
+  if (!data.length) {
+    const filtering =
+      document.getElementById('f-sev').value ||
+      document.getElementById('f-cat').value ||
+      document.getElementById('f-search').value.trim() ||
+      document.getElementById('f-range').value !== 'today';
+    const title    = filtering ? 'No alerts match your filter' : 'No alerts in the feed yet';
+    const subtitle = filtering
+      ? 'Try widening the time range or clearing the filters above.'
+      : 'Waiting for new detections from Wazuh. Check <a href="/health" style="color:var(--accent)">/health</a> if you expected alerts.';
+    feedEl.innerHTML = `
+      <div style="padding:48px;text-align:center;color:var(--text-3)">
+        <div style="font-size:36px;margin-bottom:10px"><i data-lucide="circle-check" class="ui-icon"></i></div>
+        <div style="font-size:15px;font-weight:600;color:var(--text-2);margin-bottom:4px">${title}</div>
+        <div style="font-size:13px">${subtitle}</div>
+      </div>`;
+    refreshIcons(feedEl);
+    return;
+  }
+
+  feedEl.innerHTML = data.map(a => {
+    const catInfo = CAT_INFO[a.category];
+    return `
+      <div class="al-card ${a.sev}" id="alcard-${a.id}">
+        <div class="al-card-hd">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span class="badge ${a.sev}"><span class="bdot"></span>${SEV_LBL[a.sev] || a.sev}</span>
+            ${catInfo ? `<span class="al-type-pill ${catInfo.cls}">${catInfo.label}</span>` : ''}
+            <span class="al-card-title">${escapeHtml(a.name)}</span>
+          </div>
+          <span class="al-card-time">${escapeHtml(a.time)}</span>
+        </div>
+        <div class="al-card-desc">${escapeHtml(a.desc)}</div>
+        <div class="al-card-host" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+          <span><i data-lucide="laptop" class="ui-icon"></i> Affected computer: <strong>${escapeHtml(a.computer)}</strong></span>
+          <span style="color:var(--text-3);font-size:12px">Rule ID: ${escapeHtml(a.ruleId)}</span>
+          ${a.source_ip   && a.source_ip   !== 'N/A' ? `<span style="color:var(--text-3);font-size:12px">Source IP: ${escapeHtml(a.source_ip)}</span>`   : ''}
+          ${a.target_user && a.target_user !== 'N/A' ? `<span style="color:var(--text-3);font-size:12px">User: ${escapeHtml(a.target_user)}</span>`       : ''}
+          ${a.mitre_id    && a.mitre_id    !== 'N/A' ? `<span style="color:var(--text-3);font-size:12px">MITRE: ${escapeHtml(a.mitre_id)}</span>`        : ''}
+        </div>
+        <div class="al-actions" style="margin-top:10px">
+          <button class="btn btn-ghost btn-sm" onclick="toggleExplain('${a.id}')">
+            <i data-lucide="circle-help" class="ui-icon"></i> Details
+          </button>
+        </div>
+        <div class="explain-panel" id="explain-${a.id}">
+          <strong>Why this matters</strong><br>${SEV_DESC[a.sev] || ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  refreshIcons(feedEl);
+}
+
+function toggleExplain(id) {
+  const el = document.getElementById('explain-' + id);
+  if (el) el.style.display = el.style.display === 'block' ? 'none' : 'block';
+}
+
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── Ensure a valid default even if browser state is stale ──
+(function initRangeDefault(){
+  const el = document.getElementById('f-range');
+  const valid = Object.keys(RANGE_MINUTES).concat(['today', 'custom']);
+  if (!el.value || !valid.includes(el.value)) {
+    el.value = 'today';
+  }
+})();
+
+// ── Initial load + auto-refresh (skips when searching) ──
+loadFeed();
+setInterval(() => {
+  const searching = document.activeElement === document.getElementById('f-search');
+  if (!searching) loadFeed();
+}, 30000);

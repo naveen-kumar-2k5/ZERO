@@ -1,0 +1,833 @@
+
+let CASE = null;
+let CUR_PLATFORM = 'linux';
+const OPEN_STEPS = new Set();      // indices whose .step-body is expanded
+const RUN_STATES = {};             // per-step run/preview state, keyed by step index
+let AGENT_ONLINE = null;           // last known connectivity from /status
+
+function refreshIcons(root = document) {
+  if (!window.lucide || !lucide.createIcons) return;
+  const target = root && typeof root.querySelectorAll === 'function' ? root : document;
+  lucide.createIcons({ root: target, attrs: { 'stroke-width': 1.9 } });
+}
+document.addEventListener('DOMContentLoaded', refreshIcons);
+
+// ── clock ────────────────────────────────────────────
+function tickClock() {
+  const ist = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Kolkata' }));
+  const p = n => String(n).padStart(2, '0');
+  document.getElementById('live-time').textContent =
+    `${p(ist.getHours())}:${p(ist.getMinutes())}:${p(ist.getSeconds())} IST`;
+}
+tickClock(); setInterval(tickClock, 1000);
+
+// ── load ─────────────────────────────────────────────
+async function loadCase() {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    CASE = body.data;
+    render();
+
+    // Prefetch previews for the active step and any open step so the pane
+    // shows Run / guard banner without the user needing to click around.
+    const active = CASE.curStep;
+    if (active < CASE.playbook.steps.length) OPEN_STEPS.add(active);
+    const toPrefetch = new Set([active, ...OPEN_STEPS]);
+    toPrefetch.forEach(idx => {
+      if (idx < CASE.playbook.steps.length) {
+        if (!RUN_STATES[idx] || RUN_STATES[idx].automation === undefined) {
+          loadPreview(idx);
+        }
+      }
+    });
+  } catch (err) {
+    document.getElementById('case-root').innerHTML = `
+      <div style="padding:48px 20px;text-align:center;color:var(--c-critical)">
+        <i data-lucide="circle-x" class="ui-icon" style="width:40px;height:40px"></i>
+        <div style="margin-top:10px;font-weight:700;font-size:15px">Could not load case</div>
+        <div style="font-size:13px;color:var(--text-3);margin-top:6px">${escapeHtml(err.message)}</div>
+        <div style="margin-top:14px"><a href="/incidents" class="btn btn-secondary btn-sm"><i data-lucide="arrow-left" class="ui-icon"></i> Back to Incidents</a></div>
+      </div>`;
+    refreshIcons(document.getElementById('case-root'));
+  }
+}
+
+// ── render ───────────────────────────────────────────
+function render() {
+  const c = CASE;
+  if (!c) return;
+
+  if (!c.playbook) {
+    document.getElementById('case-root').innerHTML =
+      `<div style="padding:32px;text-align:center;color:var(--text-3)">No playbook defined for this case.</div>`;
+    return;
+  }
+
+  const pb       = c.playbook;
+  const total    = c.totalSteps;
+  const cur      = c.curStep;
+  const pct      = total ? Math.round((cur / total) * 100) : 0;
+  const sevLbl   = { critical:'Critical', high:'High', medium:'Medium', low:'Low' }[c.severity] || c.severity;
+  const modeLbl  = c.mode || 'assisted';
+
+  // ── header block ──
+  const headerHtml = `
+    <button class="back-btn" onclick="window.location='/incidents'">
+      <i data-lucide="arrow-left" class="ui-icon"></i> Back to Incident Cases
+    </button>
+    <div class="case-hd-block">
+      <div class="case-hd-top">
+        <div>
+          <div class="case-title-row">
+            <span class="case-id">${escapeHtml(c.caseRef)}</span>
+            <span class="badge ${c.severity}"><span class="bdot"></span>${sevLbl}</span>
+            <span style="font-size:15px;font-weight:700;color:var(--text-1)">${escapeHtml(c.threatType)} Response</span>
+          </div>
+          <div class="case-meta">
+            <span><i data-lucide="user" class="ui-icon"></i> ${escapeHtml(c.assignedTo || 'Unassigned')}</span>
+            <span><i data-lucide="laptop" class="ui-icon"></i> ${escapeHtml(c.agent || 'unknown')}</span>
+            <span><i data-lucide="clock-3" class="ui-icon"></i> Opened ${escapeHtml(c.openedAtIst || '—')}</span>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;flex-shrink:0">
+          <span style="font-size:12.5px;color:var(--text-2)">Status:</span>
+          <select class="status-sel" onchange="updateStatus(this.value)">
+            ${['open','investigating','containing','contained','resolved','false-positive']
+              .map(k => `<option value="${k}" ${c.status === k ? 'selected' : ''}>${({
+                'open':'Open','investigating':'Investigating','containing':'Containing',
+                'contained':'Contained','resolved':'Resolved','false-positive':'False Positive'
+              })[k]}</option>`).join('')}
+          </select>
+          <span class="zr-mode-sel">
+            <span style="font-size:12.5px;color:var(--text-2)">Mode:</span>
+            <select onchange="updateMode(this.value)" title="Manual = instructions only. Assisted = Run buttons with human approval.">
+              <option value="manual"   ${modeLbl === 'manual'   ? 'selected' : ''}>Manual</option>
+              <option value="assisted" ${modeLbl === 'assisted' ? 'selected' : ''}>Assisted</option>
+            </select>
+          </span>
+        </div>
+      </div>
+      <div class="case-desc"><i data-lucide="triangle-alert" class="ui-icon"></i> ${escapeHtml(c.description || '')}</div>
+    </div>`;
+
+  // ── step dots ──
+  const dots = pb.steps.map((_, i) => {
+    const st = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+    const lbl = i < cur ? '<i data-lucide="check" class="ui-icon"></i>' : (i + 1);
+    const conn = i < pb.steps.length - 1
+      ? `<div class="step-conn ${i < cur ? 'done' : ''}"></div>` : '';
+    return `<div class="step-dot-wrap"><div class="step-dot ${st}">${lbl}</div>${conn}</div>`;
+  }).join('');
+
+  const progressHtml = `
+    <div class="step-prog">
+      <div class="step-dots">${dots}</div>
+      <div class="prog-bar-wrap">
+        <div class="prog-bar"><div class="prog-bar-fill" style="width:${pct}%"></div></div>
+        <span class="prog-label">Step ${Math.min(cur + 1, total)} of ${total} — ${pct}% complete</span>
+      </div>
+    </div>`;
+
+  // ── playbook steps ──
+  const stepsHtml = pb.steps.map((s, i) => {
+    const st = i < cur ? 'done' : i === cur ? 'active' : 'pending';
+    const isOpen = (st === 'active') || OPEN_STEPS.has(i);
+    const doneLbl = st === 'done'
+      ? `<span class="step-done-lbl"><i data-lucide="check" class="ui-icon"></i> Done</span>`
+      : '';
+
+    return `
+      <div class="pb-step ${st}" id="pbstep-${i}">
+        <div class="step-hd" onclick="toggleStep(${i})">
+          <div class="step-num">${st === 'done' ? '<i data-lucide="check" class="ui-icon"></i>' : (i + 1)}</div>
+          <div class="step-title-txt">Step ${i + 1}: ${escapeHtml(s.title)}</div>
+          ${doneLbl}
+        </div>
+        <div class="step-body" style="display:${isOpen ? 'block' : 'none'}">
+          <p class="step-plain">${escapeHtml(s.plain)}</p>
+          <div class="plat-toggle">
+            <button class="plat-btn ${CUR_PLATFORM === 'linux' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); setPlatform('linux', ${i})">
+              <i data-lucide="terminal" class="ui-icon"></i> Linux
+            </button>
+            <button class="plat-btn ${CUR_PLATFORM === 'windows' ? 'active' : ''}"
+                    onclick="event.stopPropagation(); setPlatform('windows', ${i})">
+              <i data-lucide="app-window" class="ui-icon"></i> Windows
+            </button>
+          </div>
+          ${renderTerminalSection(i, s)}
+        </div>
+      </div>`;
+  }).join('');
+
+  const reportBtn = cur >= total
+    ? `<button class="btn btn-primary btn-sm" onclick="window.location='/report?case=${CASE_ID}'">
+         <i data-lucide="file-text" class="ui-icon"></i> Generate Report
+       </button>`
+    : `<button class="btn btn-secondary btn-sm"
+               onclick="alert('Complete all response steps before generating the incident report.')">
+         <i data-lucide="lock" class="ui-icon"></i> Complete all steps to generate report
+       </button>`;
+
+  const playbookHtml = `
+    <div class="pb-card">
+      <div class="pb-hd">
+        <span class="pb-name"><i data-lucide="book-open" class="ui-icon"></i> ${escapeHtml(pb.name)}</span>
+        ${reportBtn}
+      </div>
+      ${stepsHtml}
+    </div>`;
+
+  // ── right rail ──
+  const timelineHtml = c.events.length
+    ? c.events.map(e => {
+        const type = (e.kind === 'step_undo') ? 'active'
+                   : (e.kind === 'step_run_failed') ? 'active'
+                   : 'done';
+        const t = e.createdAtIst ? e.createdAtIst.split(', ')[1] || '' : '';
+        return `
+          <div class="tl-item">
+            <span class="tl-time">${escapeHtml(t.split(' IST')[0] || '—')}</span>
+            <div class="tl-dot ${type}"></div>
+            <span class="tl-action">${escapeHtml(e.message)}</span>
+          </div>`;
+      }).join('')
+    : '<div style="font-size:13px;color:var(--text-3)">No events recorded.</div>';
+
+  const evidenceHtml = c.evidence.length
+    ? c.evidence.map(ev => `
+        <div class="ev-item">
+          <span class="ev-icon"><i data-lucide="paperclip" class="ui-icon"></i></span>
+          <span class="ev-name">${escapeHtml(ev.filename)}</span>
+          <span style="font-size:11px;color:var(--text-3)">${escapeHtml(ev.kind)}</span>
+        </div>`).join('')
+    : '<div style="font-size:13px;color:var(--text-3)">No evidence uploaded yet.</div>';
+
+  const rightHtml = `
+    <div class="card">
+      <div class="card-title" style="margin-bottom:12px">
+        <i data-lucide="clock-3" class="ui-icon"></i> Incident Timeline
+      </div>
+      <div class="timeline-list">${timelineHtml}</div>
+    </div>
+
+    <div class="card">
+      <div class="card-hd">
+        <span class="card-title">
+          <i data-lucide="paperclip" class="ui-icon"></i>
+          Evidence (${c.evidence.length})
+        </span>
+        <button class="btn btn-secondary btn-sm" onclick="openEvidenceModal()">
+          <i data-lucide="plus" class="ui-icon"></i> Add evidence
+        </button>
+      </div>
+      <div class="ev-list">${evidenceHtml}</div>
+    </div>
+
+        <div class="card">
+      <div class="card-title" style="margin-bottom:12px">
+        <i data-lucide="file-text" class="ui-icon"></i> Incident Details
+        <button class="btn btn-ghost btn-sm" style="float:right;margin-top:-4px"
+                onclick="toggleEditDetails()" title="Edit source IP, target user, and agent">
+          <i data-lucide="pencil" class="ui-icon"></i> Edit
+        </button>
+      </div>
+
+      <!-- Read-only display -->
+      <div class="dpdp-fields" id="case-details-view">
+        <div class="dpdp-row"><span class="dpdp-lbl">Attack type</span><span class="dpdp-val">${escapeHtml(c.threatType)}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Computer</span><span class="dpdp-val">${escapeHtml(c.agent || '—')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Source IP</span><span class="dpdp-val" style="${c.sourceIp ? '' : 'color:var(--c-high);font-weight:600'}">${escapeHtml(c.sourceIp || 'not set — click Edit')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Target user</span><span class="dpdp-val" style="${c.targetUser ? '' : 'color:var(--c-high);font-weight:600'}">${escapeHtml(c.targetUser || 'not set — click Edit')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">Data at risk</span><span class="dpdp-val">${escapeHtml(c.dataCategories || '—')}</span></div>
+        <div class="dpdp-row"><span class="dpdp-lbl">People affected</span><span class="dpdp-val">~${c.personsAffected || 0}</span></div>
+      </div>
+
+      <!-- Edit form (hidden until Edit clicked) -->
+      <div id="case-details-edit" style="display:none">
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label" style="font-size:11.5px">Affected agent</label>
+          <select class="form-select" id="edit-agent">
+            <option value="">(none)</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label" style="font-size:11.5px">Source IP</label>
+          <input class="form-input" id="edit-source-ip"
+                 placeholder="e.g. 192.168.244.128"
+                 value="${escapeHtml(c.sourceIp || '')}">
+        </div>
+        <div class="form-group" style="margin-bottom:10px">
+          <label class="form-label" style="font-size:11.5px">Target user</label>
+          <input class="form-input" id="edit-target-user"
+                 placeholder="e.g. administrator"
+                 value="${escapeHtml(c.targetUser || '')}">
+        </div>
+        <div style="display:flex;gap:8px;margin-top:12px">
+          <button class="btn btn-primary btn-sm" onclick="saveCaseDetails()">
+            <i data-lucide="check" class="ui-icon"></i> Save
+          </button>
+          <button class="btn btn-secondary btn-sm" onclick="toggleEditDetails()">
+            Cancel
+          </button>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+      <button class="btn btn-primary" style="width:100%" onclick="window.location='/report?case=${CASE_ID}'">
+        <i data-lucide="file-text" class="ui-icon"></i> Generate Incident Report
+      </button>
+    </div>`;
+
+  document.getElementById('case-root').innerHTML = `
+    ${headerHtml}
+    ${progressHtml}
+    <div class="case-grid">
+      <div>${playbookHtml}</div>
+      <div class="case-right">${rightHtml}</div>
+    </div>`;
+
+  refreshIcons(document.getElementById('case-root'));
+}
+
+// ── terminal section ─────────────────────────────────
+function renderTerminalSection(i, step) {
+  const state = RUN_STATES[i] || {};
+  const isActive = i === CASE.curStep;
+  const isDone = i < CASE.curStep;
+  const automation = !!state.automation && (CASE.mode !== 'manual');
+  const runStatus = state.status;
+
+  const cmd = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
+
+  let promptLine = '';
+  if (automation) {
+    const firstLine = (cmd || '').split('\n')[0].trim();
+    promptLine = firstLine || `${state.action || 'command'}`;
+  } else {
+    promptLine = 'manual — copy the command below';
+  }
+
+  const connCls = AGENT_ONLINE === true ? 'online' : AGENT_ONLINE === false ? 'offline' : 'unknown';
+  const connText = AGENT_ONLINE === true ? 'connected' : AGENT_ONLINE === false ? 'unreachable' : 'unknown';
+
+  let bodyText = '';
+  let bodyEmpty = 'Click "Run" to execute on the agent.';
+  if (!automation) {
+    bodyEmpty = CASE.mode === 'manual'
+      ? 'Manual mode — the Run button is disabled. Use Copy to paste this command on the endpoint.'
+      : 'No automated action for this step — use Copy.';
+    bodyText = cmd || '';
+  } else if (runStatus === 'running' || runStatus === 'queued') {
+    bodyEmpty = 'Running on agent…';
+    bodyText = cmd || '';
+  } else if (runStatus === 'done' && state.result) {
+    bodyEmpty = '';
+    bodyText = state.result.stdout || '';
+    if (state.result.stderr) {
+      bodyText += (bodyText ? '\n\nSTDERR:\n' : 'STDERR:\n') + state.result.stderr;
+    }
+    if (!bodyText) bodyText = '(completed with no output)';
+  } else if (runStatus === 'failed') {
+    bodyEmpty = '';
+    if (state.result) {
+      bodyText = state.result.stdout || '';
+      if (state.result.stderr) {
+        bodyText += (bodyText ? '\n\nSTDERR:\n' : 'STDERR:\n') + state.result.stderr;
+      }
+    }
+    if (!bodyText && state.error) bodyText = state.error;
+    if (!bodyText) bodyText = '(failed with no output)';
+  } else {
+    bodyText = cmd || '';
+  }
+  // Footer status
+  let footLine = '';
+  if (automation) {
+    if (runStatus === 'running' || runStatus === 'queued') {
+      footLine = `<span><span class="spin-sm"></span>Running…</span>`;
+    } else if (runStatus === 'done' && state.result) {
+      const dur = state.result.duration_ms != null ? `${state.result.duration_ms}ms` : '—';
+      footLine = `<span class="ok"><i data-lucide="check" class="ui-icon" style="width:12px;height:12px;vertical-align:-1px"></i> done · ${dur}</span>`;
+      if (state.result.audit_id) {
+        footLine += `<span>audit ${escapeHtml(state.result.audit_id.slice(0, 8))}…</span>`;
+      }
+    } else if (runStatus === 'failed') {
+      footLine = `<span class="fail"><i data-lucide="x" class="ui-icon" style="width:12px;height:12px;vertical-align:-1px"></i> failed</span>`;
+      if (state.error) {
+        footLine += `<span>${escapeHtml(state.error.slice(0, 80))}</span>`;
+      }
+    } else {
+      footLine = `<span>ready</span>`;
+    }
+  } else {
+    footLine = `<span>manual</span>`;
+  }
+
+  // Guard banner
+  let guardBanner = '';
+  if (automation) {
+    if (state.guardOk === false) {
+      guardBanner = `<div class="zr-term-guard fail">
+        <i data-lucide="shield-alert" class="ui-icon"></i>
+        ${escapeHtml(state.guardReason || 'Guard check failed')}
+      </div>`;
+    } else if (state.guardOk === true) {
+      guardBanner = `<div class="zr-term-guard ok">
+        <i data-lucide="shield-check" class="ui-icon"></i>
+        Guards clear · target not protected · agent ${escapeHtml(state.agent || CASE.agent || '—')}
+      </div>`;
+    }
+  }
+
+  // Buttons
+  let actions = '';
+  const running = runStatus === 'running' || runStatus === 'queued';
+  const hasUndoneRun = !!(state.latestRun && state.latestRun.undoOf);
+
+  if (automation) {
+    const canRun = !running && state.guardOk !== false;
+    const canUndo = runStatus === 'done' && state.undo && !hasUndoneRun;
+
+    actions = `
+      <div class="zr-term-actions">
+        <button class="btn btn-primary btn-sm"
+                onclick="event.stopPropagation(); runStep(${i}, false)"
+                ${canRun ? '' : 'disabled'}>
+          <i data-lucide="play" class="ui-icon"></i>
+          ${runStatus === 'done' ? 'Run again' : 'Run'}
+        </button>
+        ${canUndo
+          ? `<button class="btn btn-ghost btn-sm"
+                     style="color:var(--c-high);border-color:var(--c-high-border)"
+                     onclick="event.stopPropagation(); runStep(${i}, true)">
+               <i data-lucide="undo-2" class="ui-icon"></i> Undo (${escapeHtml(state.undo)})
+             </button>`
+          : ''}
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); copyCmd(${i})">
+          <i data-lucide="clipboard-list" class="ui-icon"></i> Copy command
+        </button>
+        ${isActive
+          ? `<button class="btn btn-success btn-sm"
+                     onclick="event.stopPropagation(); completeStep(${i})">
+               <i data-lucide="check" class="ui-icon"></i> Done — Next Step
+             </button>`
+          : ''}
+      </div>`;
+  } else {
+    actions = `
+      <div class="zr-term-actions">
+        <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation(); copyCmd(${i})">
+          <i data-lucide="clipboard-list" class="ui-icon"></i> Copy command
+        </button>
+        ${isActive
+          ? `<button class="btn btn-success btn-sm"
+                     onclick="event.stopPropagation(); completeStep(${i})">
+               <i data-lucide="check" class="ui-icon"></i> Done — Next Step
+             </button>`
+          : ''}
+        ${isDone
+          ? `<button class="btn btn-ghost btn-sm"
+                     style="color:var(--c-high);border-color:var(--c-high-border)"
+                     onclick="event.stopPropagation(); undoStep(${i})">
+               <i data-lucide="undo-2" class="ui-icon"></i> Undo step
+             </button>`
+          : ''}
+      </div>`;
+  }
+
+  return `
+    <div class="zr-term">
+      <div class="zr-term-hd">
+        <span class="prompt">${escapeHtml(CASE.agent || 'agent')} &gt;</span>
+        <span class="argv">${escapeHtml(promptLine)}</span>
+        ${automation
+          ? `<span class="zr-conn"><span class="zr-conn-dot ${connCls}"></span>${connText}</span>`
+          : ''}
+      </div>
+      <div class="zr-term-body" data-empty="${escapeHtml(bodyEmpty)}">${escapeHtml(bodyText)}</div>
+      ${footLine ? `<div class="zr-term-foot">${footLine}</div>` : ''}
+    </div>
+    ${guardBanner}
+    <div class="step-expected">
+      <div class="exp-lbl"><i data-lucide="circle-check" class="ui-icon"></i> What you should see:</div>
+      ${escapeHtml(step.expected)}
+    </div>
+    ${actions}
+  `;
+}
+
+// Re-render just the bottom half of one step body, preserving scroll and
+// the step header (so toggle/collapse state doesn't jump).
+function rerenderStepBody(i) {
+  const el = document.getElementById('pbstep-' + i);
+  if (!el) return;
+  const body = el.querySelector('.step-body');
+  if (!body) return;
+  const step = CASE && CASE.playbook && CASE.playbook.steps[i];
+  if (!step) return;
+  const platToggle = body.querySelector('.plat-toggle');
+  if (!platToggle) return;
+  // Remove everything after the platform toggle
+  let n = platToggle.nextSibling;
+  while (n) {
+    const next = n.nextSibling;
+    body.removeChild(n);
+    n = next;
+  }
+  const frag = document.createElement('div');
+  frag.innerHTML = renderTerminalSection(i, step);
+  while (frag.firstChild) body.appendChild(frag.firstChild);
+  refreshIcons(body);
+}
+
+// ── interactions ─────────────────────────────────────
+function toggleStep(i) {
+  const el = document.getElementById('pbstep-' + i);
+  if (!el) return;
+  const body = el.querySelector('.step-body');
+  if (!body) return;
+  if (el.classList.contains('done')) return;   // done steps don't expand
+  const wasOpen = body.style.display === 'block';
+  if (wasOpen) {
+    OPEN_STEPS.delete(i);
+    body.style.display = 'none';
+  } else {
+    OPEN_STEPS.add(i);
+    body.style.display = 'block';
+    if (!RUN_STATES[i] || RUN_STATES[i].automation === undefined) {
+      loadPreview(i);
+    }
+  }
+}
+
+function setPlatform(platform, i) {
+  CUR_PLATFORM = platform;
+  render();
+  OPEN_STEPS.add(i);
+  const body = document.querySelector('#pbstep-' + i + ' .step-body');
+  if (body) body.style.display = 'block';
+  if (RUN_STATES[i] && RUN_STATES[i].runId && (RUN_STATES[i].status === 'running' || RUN_STATES[i].status === 'queued')) {
+    resumePolling(i);
+  }
+}
+
+async function copyCmd(i) {
+  const step = CASE.playbook.steps[i];
+  let text = '';
+  if (RUN_STATES[i] && RUN_STATES[i].automation && RUN_STATES[i].action) {
+    // For automated steps, prefer the resolved action+args line.
+    const s = RUN_STATES[i];
+    const argStr = Object.entries(s.args || {}).map(([k, v]) => `${k}=${v}`).join(' ');
+    text = `${s.action}${argStr ? ' ' + argStr : ''}`;
+  } else {
+    text = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
+  }
+  try {
+    await navigator.clipboard.writeText(text || '');
+    const el = document.getElementById('pbstep-' + i);
+    const btn = el && el.querySelector('.zr-term-actions .btn-ghost');
+    if (btn) {
+      const orig = btn.innerHTML;
+      btn.innerHTML = '<i data-lucide="check" class="ui-icon"></i> Copied';
+      refreshIcons(btn);
+      setTimeout(() => { btn.innerHTML = orig; refreshIcons(btn); }, 1500);
+    }
+  } catch (e) { /* silent */ }
+}
+
+async function completeStep(i) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/complete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    OPEN_STEPS.delete(i);
+    await loadCase();
+  } catch (err) { alert('Could not complete step: ' + err.message); }
+}
+
+async function undoStep(i) {
+  if (!confirm('Undo this step? (marking it as not done on the case)')) return;
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/undo`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    OPEN_STEPS.add(i);
+    await loadCase();
+  } catch (err) { alert('Could not undo step: ' + err.message); }
+}
+
+async function updateStatus(val) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: val }),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    await loadCase();
+  } catch (err) { alert('Could not update status: ' + err.message); }
+}
+
+async function updateMode(val) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: val }),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    await loadCase();
+  } catch (err) { alert('Could not update mode: ' + err.message); }
+}
+// ── inline edit of case context fields ───────────────
+let EDIT_AGENTS_LOADED = false;
+
+async function toggleEditDetails() {
+  const view = document.getElementById('case-details-view');
+  const edit = document.getElementById('case-details-edit');
+  if (!view || !edit) return;
+
+  const opening = edit.style.display === 'none';
+  view.style.display = opening ? 'none' : 'block';
+  edit.style.display = opening ? 'block' : 'none';
+
+  if (opening && !EDIT_AGENTS_LOADED) {
+    // Populate the agent dropdown once, from the inventory
+    const sel = document.getElementById('edit-agent');
+    try {
+      const r = await fetch('/api/v1/automation/agents', { cache: 'no-store' });
+      const body = await r.json();
+      if (r.ok && body.status === 'success') {
+        const agents = body.data || [];
+        sel.innerHTML = '<option value="">(none)</option>' +
+          agents.map(a =>
+            `<option value="${escapeHtml(a.name)}">${escapeHtml(a.name)} — ${escapeHtml(a.os)} — ${escapeHtml(a.ip || '?')}</option>`
+          ).join('');
+        if (CASE && CASE.agent) sel.value = CASE.agent;
+      }
+    } catch (e) { /* leave as (none) */ }
+    EDIT_AGENTS_LOADED = true;
+  }
+}
+
+async function saveCaseDetails() {
+  const agent      = document.getElementById('edit-agent').value.trim();
+  const sourceIp   = document.getElementById('edit-source-ip').value.trim();
+  const targetUser = document.getElementById('edit-target-user').value.trim();
+
+  // Minimal client-side validation — the backend does the real checks.
+  if (sourceIp && !/^(\d{1,3}\.){3}\d{1,3}$/.test(sourceIp) && sourceIp.indexOf(':') === -1) {
+    alert('Source IP does not look like a valid IPv4 or IPv6 address.');
+    return;
+  }
+  if (targetUser && !/^[A-Za-z0-9._-]{1,64}$/.test(targetUser)) {
+    alert('Target user must be 1–64 chars, alphanumeric + . _ -');
+    return;
+  }
+
+  const patch = {};
+  if ((CASE.agent || '') !== agent)            patch.agent      = agent;
+  if ((CASE.sourceIp || '') !== sourceIp)      patch.sourceIp   = sourceIp;
+  if ((CASE.targetUser || '') !== targetUser)  patch.targetUser = targetUser;
+
+  if (!Object.keys(patch).length) {
+    toggleEditDetails();   // nothing changed, just close
+    return;
+  }
+
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+
+    // Clear preview cache for any step with an unresolved guard, so the
+    // Run button enables immediately on the next render.
+    Object.keys(RUN_STATES).forEach(i => {
+      if (RUN_STATES[i] && RUN_STATES[i].guardOk === false) {
+        delete RUN_STATES[i];
+      }
+    });
+    EDIT_AGENTS_LOADED = false;
+    await loadCase();
+  } catch (err) {
+    alert('Could not save: ' + err.message);
+  }
+}
+
+// ── preview / run / poll ─────────────────────────────
+async function loadPreview(i) {
+  const step = CASE && CASE.playbook && CASE.playbook.steps[i];
+  const cmd = step ? (CUR_PLATFORM === 'linux' ? step.linux : step.windows) : '';
+  const hasCmd = !!(cmd && cmd.trim());
+  RUN_STATES[i] = {
+    ...(RUN_STATES[i] || {}),
+    automation: hasCmd,
+    action: hasCmd ? `exec_${CUR_PLATFORM}` : null,
+    args: {},
+    guardOk: hasCmd ? true : undefined,
+    agent: CASE ? CASE.agent : null,
+  };
+  rerenderStepBody(i);
+}
+
+async function seedAgentOnline(i) {
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/status`, { cache: 'no-store' });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') return;
+    if (AGENT_ONLINE !== body.data.agentOnline) {
+      AGENT_ONLINE = body.data.agentOnline;
+      rerenderStepBody(i);
+    }
+  } catch (_) { /* leave unknown */ }
+}
+
+async function runStep(i, isUndo) {
+  const state = RUN_STATES[i] || {};
+  if (state.status === 'running') return;
+  const step = CASE.playbook.steps[i];
+  const cmd = CUR_PLATFORM === 'linux' ? step.linux : step.windows;
+  if (!cmd || !cmd.trim()) {
+    alert(`No ${CUR_PLATFORM} command for this step.`);
+    return;
+  }
+
+  const confirmMsg =
+    `Run ${CUR_PLATFORM} command on ${CASE.agent || 'agent'}?\n\n` +
+    `${cmd}\n\n` +
+    `The click is the approval. Continue?`;
+  if (!confirm(confirmMsg)) return;
+  RUN_STATES[i] = { ...state, status: 'running', runId: null, result: null, error: null };
+  rerenderStepBody(i);
+
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/run`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ approve: true, undo: !!isUndo }),
+    });
+    const body = await r.json();
+    if (r.status === 503) {
+      RUN_STATES[i] = { ...RUN_STATES[i], status: 'failed', error: body.error || 'agent offline' };
+      rerenderStepBody(i);
+      return;
+    }
+    if (!r.ok || body.status !== 'success') {
+      throw new Error(body.error || 'Failed to start');
+    }
+    RUN_STATES[i].runId = body.data.runId;
+    pollRun(i);
+  } catch (err) {
+    RUN_STATES[i] = { ...RUN_STATES[i], status: 'failed', error: err.message };
+    rerenderStepBody(i);
+  }
+}
+
+function resumePolling(i) {
+  if (RUN_STATES[i] && RUN_STATES[i]._timer) return;
+  pollRun(i);
+}
+
+function pollRun(i) {
+  const state = RUN_STATES[i];
+  if (!state || !state.runId) return;
+  if (state._timer) clearInterval(state._timer);
+
+  state._timer = setInterval(async () => {
+    try {
+      const r = await fetch(`/api/v1/incidents/${CASE_ID}/steps/${i}/status`, { cache: 'no-store' });
+      const body = await r.json();
+      if (!r.ok || body.status !== 'success') return;
+      const d = body.data;
+      AGENT_ONLINE = d.agentOnline;
+
+      const run = d.run;
+      if (!run) return;
+      if (run.status === 'queued' || run.status === 'running') {
+        RUN_STATES[i] = { ...RUN_STATES[i], status: 'running' };
+        rerenderStepBody(i);
+        return;
+      }
+      // terminal
+      clearInterval(state._timer);
+      RUN_STATES[i] = {
+        ...RUN_STATES[i],
+        status: run.status,
+        result: run.resultJson,
+        error: run.error,
+        latestRun: run,
+        _timer: null,
+      };
+      rerenderStepBody(i);
+      setTimeout(loadCase, 600);   // refresh timeline + evidence
+    } catch (err) {
+      // keep polling on transient network errors
+    }
+  }, 1500);
+}
+
+// ── evidence modal ───────────────────────────────────
+function openEvidenceModal() {
+  document.getElementById('ev-filename').value = '';
+  document.getElementById('ev-notes').value = '';
+  document.getElementById('ev-kind').value = 'Other';
+  document.getElementById('evidence-modal').style.display = 'flex';
+  refreshIcons(document.getElementById('evidence-modal'));
+}
+
+function closeEvidenceModal() {
+  document.getElementById('evidence-modal').style.display = 'none';
+}
+
+async function attachEvidence() {
+  const filename = document.getElementById('ev-filename').value.trim();
+  if (!filename) { alert('Filename is required.'); return; }
+  const kind  = document.getElementById('ev-kind').value;
+  const notes = document.getElementById('ev-notes').value.trim();
+  try {
+    const r = await fetch(`/api/v1/incidents/${CASE_ID}/evidence`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, kind, notes }),
+    });
+    const body = await r.json();
+    if (!r.ok || body.status !== 'success') throw new Error(body.error || 'Failed');
+    closeEvidenceModal();
+    await loadCase();
+  } catch (err) { alert('Could not attach evidence: ' + err.message); }
+}
+
+// ── escape ───────────────────────────────────────────
+function escapeHtml(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// ── boot ─────────────────────────────────────────────
+loadCase();
+setInterval(() => {
+  const anyRunning = Object.values(RUN_STATES).some(
+    s => s && (s.status === 'running' || s.status === 'queued')
+  );
+  const modalOpen = document.getElementById('evidence-modal').style.display !== 'none';
+  if (!anyRunning && !modalOpen) loadCase();
+}, 30000);
+
+window.addEventListener('beforeunload', () => {
+  Object.values(RUN_STATES).forEach(s => { if (s && s._timer) clearInterval(s._timer); });
+});
